@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'core/theme/noir_theme.dart';
-import 'core/constants.dart';
+import 'package:noir_android_app/core/constants.dart';
+import 'package:noir_android_app/core/theme/noir_theme.dart';
+import 'package:noir_android_app/ui/command_centre_screen.dart';
 
 void main() => runApp(const NoirApp());
 
+/// Root widget for the Noir Android app.
 class NoirApp extends StatelessWidget {
   const NoirApp({super.key});
 
@@ -14,13 +16,7 @@ class NoirApp extends StatelessWidget {
       theme: noirTheme,
       darkTheme: noirTheme,
       themeMode: ThemeMode.dark,
-      home: const Scaffold(
-        backgroundColor: NoirColors.black,
-        appBar: null,
-        body: Center(
-          child: Text('Noir', style: TextStyle(color: NoirColors.white, fontSize: 32)),
-        ),
-      ),
+      home: const CommandCentreScreen(),
     );
   }
 }

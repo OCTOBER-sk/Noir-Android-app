@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">noir_android_app</string>
+    <string name="accessibility_service_description">Noir Accessibility Service</string>
+</resources>

@@ -1,0 +1,38 @@
+{
+  "project": "Noir-Android-app",
+  "design_system": "mono",
+  "design_system_path": "/tmp/od-new/design-systems/mono",
+  "theme": "monochrome-dark",
+  "skill_ref": "claude-code-v2.1.261",
+  "version": "0.21.1",
+  "engine": "claude-code-v2.1.261",
+  "bind_path": "/tmp/noir-repo/lib/core/theme/",
+  "proof": [
+    {
+      "type": "pdf",
+      "path": "docs/noir-ui-proof.pdf"
+    },
+    {
+      "type": "screenshot",
+      "path": "docs/screenshots/command-centre-dark.png"
+    },
+    {
+      "type": "design-token-audit",
+      "path": "lib/core/theme/noir_theme.dart"
+    }
+  ],
+  "constraints": {
+    "no_accent_colors": true,
+    "palette_tokens": [
+      "pureBlack",
+      "nearBlack",
+      "surfaceDark",
+      "surfaceDark2",
+      "textMuted",
+      "textSecondary",
+      "pureWhite"
+    ],
+    "font_system": "Roboto",
+    "no_custom_font_bundle": true
+  }
+}

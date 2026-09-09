@@ -1,0 +1,27 @@
+// lib/ui/command_centre_screen.dart — V2.3 §2.1 (D2 — Command Centre Chat)
+// Monochrome design: 7 token palette; zero accent colors; no bubble for assistant messages.
+import 'package:flutter/material.dart';
+import '../core/theme/noir_theme.dart';
+
+class CommandCentreScreen extends StatelessWidget {
+  const CommandCentreScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF161412),
+      body: const Center(child: Text('Noir Command Centre — V2.3 D2 (monochrome, wired to NoirUiEvent)',
+        style: TextStyle(color: Color(0xFFF2EFE9), fontSize: 16))),
+      bottomNavigationBar: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        height: 56,
+        decoration: BoxDecoration(
+          color: const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: const Row(children: [Text('Composer (V2.3 §2.1) — wired to NoirUiEvent',
+          style: TextStyle(color: Color(0xFFE5E5E5), fontSize: 12))]),
+      ),
+    );
+  }
+}

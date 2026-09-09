@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Noir Command Centre — V2.3 Proof</title>
+<style>
+@page { size: 1280px 900px; margin: 0; }
+body { font-family: 'Roboto', sans-serif; background: #161412; color: #F2EFE9; width: 1280px; height: 900px; padding: 32px; box-sizing: border-box; }
+.header { font-size: 24px; font-weight: 400; line-height: 1.5; margin-bottom: 32px; }
+.composer-area { background: #121212; border-radius: 28px; padding: 16px; width: calc(100% - 32px); margin: 0 auto 24px auto; }
+.message-row { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+.user-bubble { background: #121212; color: #FFFFFF; border-radius: 22px; padding: 12px 16px; max-width: 70%; font-size: 16px; }
+.assistant-row { text-align: left; margin-bottom: 16px; }
+.assistant-text { color: #F2EFE9; font-size: 16px; line-height: 1.5; }
+.skeleton-bar { background: #2A2A2A; border-radius: 4px; height: 16px; margin-bottom: 8px; width: 80%; }
+.confirmation-card { background: #1E1E1E; border: 1px solid #2A2A2A; border-radius: 12px; padding: 16px; margin: 16px 0; }
+.confirm-btn { background: #FFFFFF; color: #000000; border: none; border-radius: 36px; padding: 8px 24px; font-size: 14px; font-weight: 600; }
+.cancel-btn { background: transparent; border: 1px solid #2A2A2A; color: #E5E5E5; border-radius: 36px; padding: 8px 24px; font-size: 14px; }
+.toast { position: fixed; bottom: 16px; left: 16px; right: 16px; background: #121212; color: #FFFFFF; border-radius: 12px; padding: 12px 16px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="header">Noir Command Centre — V2.3 D2 (monochrome, real backend wired)</div>
+<div class="message-row"><div class="user-bubble">Can you summarize this thread and draft a response in my tone?</div></div>
+<div class="assistant-row"><div class="assistant-text">Analyzing with model...</div></div>
+<div class="skeleton-bar" style="width: 60%;"></div>
+<div class="skeleton-bar" style="width: 90%;"></div>
+<div class="skeleton-bar" style="width: 40%;"></div>
+<div class="confirmation-card">
+  <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">Standard risk — Propose Skill</div>
+  <div style="font-size: 12px; color: #B0B0B0;">Tool: Skill Proposer &nbsp;|&nbsp; Screen content sanitized: No</div>
+  <div style="margin-top: 12px; display: flex; gap: 8px;"><button class="confirm-btn">Confirm</button><button class="cancel-btn">Cancel</button></div>
+</div>
+<div class="toast">Action completed — Undo available (5s countdown remaining)</div>
+</body>
+</html>

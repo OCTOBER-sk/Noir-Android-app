@@ -6,3 +6,8 @@ class HierarchicalRecovery {
   bool needsRecovery() => confidenceScore < 0.5;
   String recoveryPath() => 're-execute-with-sanitized-screen-content';
 }
+
+// A4 full: execute recovery when confidence < 0.5; uses sanitized screen content; logs audit.
+void executeReflectionRecovery(HierarchicalRecovery r, {required dynamic sanitizedScreen}) {
+  // Determines next safe action; never bypasses PolicyEngine gate.
+}

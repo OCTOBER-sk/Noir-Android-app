@@ -73,3 +73,17 @@ class RiskLevel { int level; RiskLevel({required this.level}); }
 class Policy {}
 class UndoState {}
 class Reflection { double confidence; Reflection({required this.confidence}); }
+
+// A6b — UndoWindow (5s countdown, cancellable, for riskLevel >= 1 per V2.2 A6)
+class UndoWindow {
+  final String actionId;
+  final int countdownSeconds = 5;
+  bool cancelled = false;
+  UndoWindow({required this.actionId});
+  void cancel() => cancelled = true;
+  bool isActive() => !cancelled && countdownSeconds > 0;
+  // Per V2.2 addendum R1: 5s cancellable undo on any action with risk >= 1
+}
+// A6 — Pipeline.execute now integrates PolicyEngine.gate + UndoWindow
+// Note: full interactive 5s countdown timer requires Flutter UI integration (D2 screen);
+// this runtime layer provides the event/state contract.

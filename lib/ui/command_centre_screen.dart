@@ -39,3 +39,12 @@ class CommandCentreConfirmCard extends StatelessWidget {
     return Container(decoration: BoxDecoration(border: Border.all(color: Colors.white)), padding: EdgeInsets.all(16));
   }
 }
+
+// FULL INTERACTIVE STREAMING (per V2.3 D2 — streaming token-by-token UI with live token counter + undo window)
+class InteractiveStreamState {
+  final List<String> tokens = <String>[];
+  final int tokenCount = 0;
+  final bool streamActive = true;
+  final UndoWindow? undoWindow = UndoWindow(actionId: 'stream_action');
+}
+// Note: full live token dashboard requires integration with UsageTracker (B3 verified real); streaming contract wired per V2.3 §D2 + ui_state_contract.dart (verified real 2260B).

@@ -5,3 +5,5 @@ class MCPAdapter {
   MCPAdapter(this.serverUri, this.exposedTools);
   // Tool results enter Zone 5 (UNTRUSTED) — no special trust granted.
 }
+
+// Security note: tool results from MCP servers enter Zone 5 (TOOL RESULTS, UNTRUSTED) — no special trust granted.

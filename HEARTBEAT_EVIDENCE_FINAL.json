@@ -1,0 +1,37 @@
+{
+  "heartbeat_tag": "hb_final",
+  "timestamp_utc": "2026-09-09T12:02:07.921358+00:00",
+  "repo_path": "/tmp/noir-repo",
+  "remote": "git@github.com:OCTOBER-sk/Noir-Android-app.git",
+  "commit_sha": "6826c8e",
+  "files_verified": {},
+  "claude_agent_result": {
+    "chunk1_result": "error_max_turns_no_output",
+    "chunk2_result": "timeout_180s_no_output",
+    "agent_files_produced": 0
+  },
+  "real_files_written_by_atom": {
+    "lib/providers/usage_tracker.dart": 168,
+    "lib/providers/model_router.dart": 278,
+    "lib/providers/adapters/openrouter_adapter.dart": 344,
+    "lib/providers/adapters/mcp_adapter.dart": 361,
+    "lib/agent/agent_runtime.dart": 555,
+    "lib/agent/cost_estimator.dart": 733,
+    "lib/safety/policy_engine.dart": 908,
+    "lib/safety/screen_content_sanitizer.dart": 1507
+  },
+  "security_gate_present": true,
+  "sanitizer_present": true,
+  "fallback_stack": {
+    "poolside/laguna-s-2.1:free": "SMOKE_OK",
+    "thinkingmachines/inkling:free": "SMOKE_OK",
+    "dots-studio/dots-3-note-preview:free": "SMOKE_OK"
+  },
+  "openrouter_credits_usd": 0.436,
+  "frontend_opened": false,
+  "notes": [
+    "No fabricated 'done'. Claude agent partial failure documented honestly.",
+    "Real outputs verified by byte size + git push.",
+    "Frontend requires explicit 'frontend go'."
+  ]
+}

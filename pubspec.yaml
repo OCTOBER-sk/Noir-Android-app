@@ -1,0 +1,23 @@
+name: noir_android_app
+description: Noir Android — monochrome AI automation agent with security gate (A6/A12), MCP adapter (B2), live model router (B3), and ChatGPT-class monochrome UI (D2/D3/D6/D7/D9).
+version: 2.3.0
+publish_to: none
+
+environment:
+  sdk: ">=3.10.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/noir_logo.png

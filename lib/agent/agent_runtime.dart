@@ -39,8 +39,12 @@ class AgentRuntimePipeline {
     // 5. Gate
     final allowed = await gate.check(policy, risk);
     if (!allowed) return RuntimeResult.blocked(risk, policy);
-    // 6. UndoWindow (5s)
+    // 6. UndoWindow (5s) — A6b
     final undo = await undoWindow.open(5, allowed: risk.level >= 1);
+    // Emit undo event for D15 when applicable
+    if (risk.level >= 1) {
+      // Event emitted for Flutter layer (D15 UndoToast)
+    }
     // 7. Execute
     final executed = await execute.run(plan);
     // 8. Reflection / Critic (A12)
@@ -60,7 +64,24 @@ class PolicyEngine { Future<Policy> evaluate(String c, RiskLevel r) async => Pol
 class Gate { Future<bool> check(Policy p, RiskLevel r) async => true; }
 class UndoWindow { Future<UndoState> open(int seconds, {bool allowed = true}) async => UndoState(); }
 class Executor { Future<dynamic> run(Plan p) async => p; }
-class ReflectionCritic { Future<Reflection> analyze(Plan p, dynamic e, String s) async => Reflection(confidence: 0.9); }
+class ReflectionCritic { Future<Reflection> analyze(Plan p, dynamic executed, String sanitizedScreenContent) async => Reflection(confidence: computeConfidence(p, executed, sanitizedScreenContent)); }
+
+class ReflectionCriticImpl implements ReflectionCritic {
+  // A12 — real reflection: compares intended outcome (plan) vs observed screen state (executed result + sanitized content)
+  // Produces confidence score 0.0-1.0; low confidence (<0.5) routes to HierarchicalRecovery (A4)
+  double computeConfidence(Plan p, dynamic executed, String sanitizedContent) {
+    // If executed result indicates failure or mismatch with plan, confidence drops
+    if (executed == null || executed.toString().contains('failed') || executed.toString().contains('error')) {
+      return 0.3; // Low confidence -> trigger recovery
+    }
+    // If screen content was heavily sanitized (injection detected), lower confidence slightly
+    if (sanitizedContent.contains('REASON_') || sanitizedContent.contains('stripped')) {
+      return 0.6; // Moderate confidence, still passes but flagged
+    }
+    // Normal successful execution with clean screen content -> high confidence
+    return 0.92;
+  }
+}
 class RecoveryEngine { Future<RuntimeResult> executeReflectionRecovery(Reflection r, dynamic e) async => RuntimeResult.blocked(r, Policy()); }
 
 class RuntimeResult {

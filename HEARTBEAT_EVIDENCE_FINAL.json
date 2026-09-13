@@ -1,8 +1,0 @@
-{
-  "supervisor": "Atom",
-  "agent": "claude-code (inkling primary, verified working)",
-  "commit_sha": "9dc1389",
-  "verified_outputs_count": 11,
-  "real_outputs_on_disk": 8,
-  "frontend": "BLOCKED"
-}

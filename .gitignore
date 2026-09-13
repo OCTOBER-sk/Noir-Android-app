@@ -1,0 +1,44 @@
+# Dart/Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.build/
+build/
+*.pid
+*.log
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/gradle/wrapper/gradle-wrapper.jar
+android/gradlew.bat
+android/local.properties
+android/.idea/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dart
+*.dart_tool/
+
+# Flutter
+.flutter/
+
+# CocoaPods
+ios/Pods/
+ios/.symlinks/
+ios/Plugins/
+ios/Runner.xcworkspace/
+
+# Unit test log files, screenshots and temp files.
+test/

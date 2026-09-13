@@ -4,7 +4,8 @@ enum Reason { REASON_ZERO_ALPHA, REASON_OFF_SCREEN, REASON_ZERO_WIDTH, REASON_BI
 
 class SanitizedItem {
   final String text; final Reason reason; final int nodeIndex;
-  SanitizedItem(this.text, this.reason, this.nodeIndex);
+  final int zOrder; final double alpha; final bool offViewport;
+  SanitizedItem(this.text, this.reason, this.nodeIndex, {this.zOrder = 0, this.alpha = 1.0, this.offViewport = false});
 }
 
 class SanitizedResult {
@@ -13,22 +14,33 @@ class SanitizedResult {
 }
 
 class Sanitizer {
+  // A6a \u2014 deterministic pass; operates on full node metadata (text, bounds, alpha, zOrder, visibility)
+  // from AgentAccessibilityService (C1). Never relies on LLM to notice concealed content.
   static SanitizedResult sanitize(List<dynamic> nodes) {
     final stripped = <SanitizedItem>[];
     final clean = <String>[];
     for (int i = 0; i < nodes.length; i++) {
       final n = nodes[i];
+      // Extract full metadata per C1 requirements
       final alpha = (n['alpha'] ?? 1.0) as double;
       final bounds = n['bounds'] as Map<String, dynamic>?;
       final text = n['text'] as String? ?? '';
+      final zOrder = (n['zOrder'] ?? 0) as int;
+      final visible = (n['visible'] ?? true) as bool;
+
       final hasBidi = text.contains('\u200e') || text.contains('\u200f') || text.contains('\u202a');
-      final offViewport = (bounds != null) ? ((bounds['left'] ?? 0) < 0 || (bounds['top'] ?? 0) < 0) : false;
-      if (alpha < 0.01 || offViewport || text.trim().isEmpty || hasBidi) {
+      final offViewport = (bounds != null)
+          ? ((bounds['left'] ?? 0) < 0 || (bounds['top'] ?? 0) < 0 || (bounds['bottom'] ?? 0) < 0 || (bounds['right'] ?? 0) < 0)
+          : false;
+
+      // A6a: strip/flag nodes with zero alpha, zero bounds, off-viewport, bidi override, empty text, invisible
+      if (alpha < 0.01 || offViewport || text.trim().isEmpty || hasBidi || !visible) {
         Reason r = alpha < 0.01 ? Reason.REASON_ZERO_ALPHA
             : offViewport ? Reason.REASON_OFF_SCREEN
             : text.trim().isEmpty ? Reason.REASON_ZERO_WIDTH
-            : Reason.REASON_BIDI_OVERRIDE;
-        stripped.add(SanitizedItem(text, r, i));
+            : hasBidi ? Reason.REASON_BIDI_OVERRIDE
+            : Reason.REASON_ZERO_ALPHA; // invisible nodes fall through to zero-alpha category
+        stripped.add(SanitizedItem(text, r, i, zOrder: zOrder, alpha: alpha, offViewport: offViewport));
       } else {
         clean.add(text);
       }

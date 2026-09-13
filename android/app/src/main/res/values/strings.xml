@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Noir</string>
+    <string name="accessibility_service_description">Noir Agent Automation Service &#8212; feeds screen content to A6a Sanitizer with full node metadata (bounds, alpha, zOrder)</string>
+</resources>

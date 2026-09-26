@@ -191,7 +191,7 @@ class UsageTracker {
     this.rpmWindow = const Duration(minutes: 1),
     DateTime Function() clock = DateTime.now,
   }) : store = store ?? InMemoryUsageStore(),
-       _pricing = pricing ?? PricingTable.empty,
+       pricing = pricing ?? PricingTable.empty,
        _clock = clock;
 
   /// Where records are persisted.
@@ -200,7 +200,15 @@ class UsageTracker {
   /// Rolling window used by [rpmUsed].
   final Duration rpmWindow;
 
-  final PricingTable _pricing;
+  /// Prices this tracker costs against.
+  ///
+  /// Settable because a price is only knowable from a live `/models` read, and
+  /// a tracker constructed before that read has nothing to price with. Starting
+  /// from [PricingTable.empty] and assigning the discovered table once the read
+  /// succeeds is how a real app gets honest costs; a table frozen at
+  /// construction would leave every cost permanently unknown.
+  PricingTable pricing;
+
   final DateTime Function() _clock;
   final List<DateTime> _requestTimes = <DateTime>[];
   final List<Future<void>> _pending = <Future<void>>[];
@@ -327,8 +335,8 @@ class UsageTracker {
   }
 
   double? _costFor(String model, TokenUsage usage) {
-    final double? prompt = _pricing.promptPer1MTokens(model);
-    final double? completion = _pricing.completionPer1MTokens(model);
+    final double? prompt = pricing.promptPer1MTokens(model);
+    final double? completion = pricing.completionPer1MTokens(model);
     if (prompt == null || completion == null) return null;
     return usage.promptTokens * prompt / 1e6 +
         usage.completionTokens * completion / 1e6;

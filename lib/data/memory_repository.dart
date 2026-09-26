@@ -34,6 +34,12 @@ class MemoryEntry extends DataRecord {
     required super.createdAt,
     required super.updatedAt,
     this.lastUsedAt,
+    this.provenanceOrigin,
+    this.provenanceSourceId,
+    this.provenanceRecordedAt,
+    this.provenanceNote,
+    this.revision,
+    this.expiresAt,
   }) : tags = List<String>.unmodifiable(tags) {
     if (key.trim().isEmpty) {
       throw const InvalidDataError('a memory needs a key');
@@ -57,6 +63,27 @@ class MemoryEntry extends DataRecord {
   final bool pinned;
   final DateTime? lastUsedAt;
 
+  /// `MemoryOrigin.name` of the `lib/memory` entry this record was written
+  /// from, or null for a record that was not written through MemoryService.
+  ///
+  /// These four fields exist so the durable store can hold a `lib/memory`
+  /// entry without dropping the part that says *where the fact came from*. A
+  /// fact the assistant proposed and a fact the user asked to save must never
+  /// be indistinguishable after a restart, so the origin travels with the
+  /// record. They are all optional: a record written before this schema, or
+  /// written directly through this repository, decodes with them null rather
+  /// than being rejected.
+  final String? provenanceOrigin;
+  final String? provenanceSourceId;
+  final DateTime? provenanceRecordedAt;
+  final String? provenanceNote;
+
+  /// `MemoryEntry.revision` from `lib/memory`, or null when not applicable.
+  final int? revision;
+
+  /// `MemoryEntry.expiresAt` from `lib/memory`, or null when it never expires.
+  final DateTime? expiresAt;
+
   /// The scope as it is stored, for display.
   String get scopeName => memoryScopeName(scope);
 
@@ -68,6 +95,12 @@ class MemoryEntry extends DataRecord {
     bool? pinned,
     DateTime? updatedAt,
     DateTime? lastUsedAt,
+    String? provenanceOrigin,
+    String? provenanceSourceId,
+    DateTime? provenanceRecordedAt,
+    String? provenanceNote,
+    int? revision,
+    DateTime? expiresAt,
   }) {
     return MemoryEntry(
       id: id,
@@ -79,6 +112,12 @@ class MemoryEntry extends DataRecord {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       lastUsedAt: lastUsedAt ?? this.lastUsedAt,
+      provenanceOrigin: provenanceOrigin ?? this.provenanceOrigin,
+      provenanceSourceId: provenanceSourceId ?? this.provenanceSourceId,
+      provenanceRecordedAt: provenanceRecordedAt ?? this.provenanceRecordedAt,
+      provenanceNote: provenanceNote ?? this.provenanceNote,
+      revision: revision ?? this.revision,
+      expiresAt: expiresAt ?? this.expiresAt,
     );
   }
 
@@ -104,6 +143,12 @@ class MemoryEntry extends DataRecord {
     'tags': List<String>.of(tags),
     'pinned': pinned,
     'lastUsedAt': lastUsedAt?.toUtc().toIso8601String(),
+    'provenanceOrigin': provenanceOrigin,
+    'provenanceSourceId': provenanceSourceId,
+    'provenanceRecordedAt': provenanceRecordedAt?.toUtc().toIso8601String(),
+    'provenanceNote': provenanceNote,
+    'revision': revision,
+    'expiresAt': expiresAt?.toUtc().toIso8601String(),
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
   };
@@ -155,6 +200,12 @@ class MemoryEntryCodec extends RecordCodec<MemoryEntry> {
         createdAt: createdAt,
         updatedAt: updatedAt,
         lastUsedAt: lastUsedAt,
+        provenanceOrigin: optionalString(json, 'provenanceOrigin'),
+        provenanceSourceId: optionalString(json, 'provenanceSourceId'),
+        provenanceRecordedAt: _optionalTimestamp(json, 'provenanceRecordedAt'),
+        provenanceNote: optionalString(json, 'provenanceNote'),
+        revision: _optionalInt(json, 'revision'),
+        expiresAt: _optionalTimestamp(json, 'expiresAt'),
       );
     } on InvalidDataError catch (error) {
       throw MalformedRecordError(
@@ -165,6 +216,25 @@ class MemoryEntryCodec extends RecordCodec<MemoryEntry> {
         cause: error,
       );
     }
+  }
+
+  /// A timestamp that a record written before this field existed simply does not
+  /// have. Present-but-unparsable is also null rather than a fatal error: the
+  /// `lib/memory` fields are advisory metadata, and refusing to open a user's
+  /// whole memory collection over one of them would be a worse failure than
+  /// reporting it as absent.
+  static DateTime? _optionalTimestamp(Map<String, Object?> json, String key) {
+    final Object? raw = json[key];
+    if (raw is! String) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  static int? _optionalInt(Map<String, Object?> json, String key) {
+    final Object? raw = json[key];
+    if (raw is int) return raw;
+    if (raw is num && raw.isFinite) return raw.toInt();
+    if (raw is String) return int.tryParse(raw.trim());
+    return null;
   }
 }
 

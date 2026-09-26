@@ -241,8 +241,21 @@ class NativeBridge {
   final MethodChannel _channel;
   final PolicyEngine _policyEngine;
   final RiskClassifier _riskClassifier;
+
   final StreamController<List<Map<String, dynamic>>> _nodeDumps =
       StreamController<List<Map<String, dynamic>>>.broadcast();
+
+  /// The engine this bridge answers `policyGate` with.
+  ///
+  /// Exposed so an object graph can adopt the *bridge's* engine rather than
+  /// building a second one. Two PolicyEngine instances in one process is a
+  /// split authority: the platform would be gated by one set of rules and the
+  /// pipeline by another, and a UI lock set on one would not apply to the
+  /// other. Whoever wires a bridge in is expected to use this instance.
+  PolicyEngine get policyEngine => _policyEngine;
+
+  /// The classifier this bridge scores every proposal with.
+  RiskClassifier get riskClassifier => _riskClassifier;
 
   bool _disposed = false;
   int _gestureSequence = 0;

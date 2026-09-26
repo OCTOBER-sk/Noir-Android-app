@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/conversation_controller.dart';
+import '../core/mcp_composition.dart';
 import '../core/theme/noir_theme.dart';
 import '../core/ui_state_contract.dart';
 import '../platform/accessibility_status.dart';
@@ -68,6 +69,8 @@ class CommandCentreScreen extends StatefulWidget {
     this.replyStream,
     this.usage,
     this.bridge,
+    this.operations,
+    this.mcp,
   });
 
   /// Injected in tests. Production leaves it null and the screen owns the
@@ -91,6 +94,17 @@ class CommandCentreScreen extends StatefulWidget {
   /// channel. The screen only ever reads status through it — it never touches
   /// a MethodChannel, and it never dispatches a gesture.
   final NativeBridge? bridge;
+
+  /// The app's real operations surface: the live task timeline, the usage
+  /// dashboard, the automation registry and the policy gate's own confirmation
+  /// prompt. Null renders no control for it at all, rather than a button that
+  /// opens an empty sheet.
+  final Widget? operations;
+
+  /// What the composition root built for MCP, handed to the Safety Center so
+  /// the two never disagree about whether Noir has MCP capability. Null means
+  /// the Safety Center says so.
+  final McpWiring? mcp;
 
   @override
   State<CommandCentreScreen> createState() => _CommandCentreScreenState();
@@ -400,9 +414,21 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
   void _openSafetyCenter() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => SafetyCenterScreen(bridge: widget.bridge),
+        builder: (_) =>
+            SafetyCenterScreen(bridge: widget.bridge, mcp: widget.mcp),
       ),
     );
+  }
+
+  /// Opens the operations surface the composition root injected. The widget is
+  /// built once, by the app, so the sheet shows the app's real objects rather
+  /// than a copy this screen made of them.
+  void _openOperations() {
+    final Widget? operations = widget.operations;
+    if (operations == null) return;
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => operations));
   }
 
   String _usageLabel() {
@@ -434,6 +460,9 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
                 usageLabel: _usageLabel(),
                 accessibilityStatus: _accessibility.status,
                 onOpenSafetyCenter: _openSafetyCenter,
+                onOpenOperations: widget.operations == null
+                    ? null
+                    : _openOperations,
               ),
               Expanded(child: _buildMessageArea()),
               const SizedBox(height: 8),
@@ -603,12 +632,17 @@ class _HeaderBar extends StatelessWidget {
     required this.usageLabel,
     required this.accessibilityStatus,
     required this.onOpenSafetyCenter,
+    this.onOpenOperations,
   });
 
   final bool streamActive;
   final String usageLabel;
   final AccessibilityStatus accessibilityStatus;
   final VoidCallback onOpenSafetyCenter;
+
+  /// Null renders no operations control, which is what a screen with nothing
+  /// wired behind it should look like.
+  final VoidCallback? onOpenOperations;
 
   @override
   Widget build(BuildContext context) {
@@ -707,6 +741,21 @@ class _HeaderBar extends StatelessWidget {
                 status: accessibilityStatus,
                 onTap: onOpenSafetyCenter,
               ),
+              if (onOpenOperations != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: onOpenOperations,
+                  icon: const Icon(
+                    Icons.tune_rounded,
+                    size: 16,
+                    color: Color(0xFF888888),
+                  ),
+                  tooltip: 'Tasks, usage and automations',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
               const SizedBox(width: 8),
               Flexible(
                 child: Text(

@@ -19,6 +19,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/mcp_composition.dart';
+import '../data/mcp_server_settings.dart' show McpServerSettings;
 import '../platform/accessibility_status.dart';
 import '../platform/native_bridge.dart';
 import '../safety/screen_content_sanitizer.dart' show SanitizedItem;
@@ -79,7 +81,13 @@ final class SafetyEventAvailable extends SafetyEventState {
 }
 
 class SafetyCenterScreen extends StatefulWidget {
-  const SafetyCenterScreen({super.key, this.bridge, this.log, this.onRetryLog});
+  const SafetyCenterScreen({
+    super.key,
+    this.bridge,
+    this.log,
+    this.onRetryLog,
+    this.mcp,
+  });
 
   /// The accessibility bridge. Null uses [NativeBridge.instance]; tests inject
   /// their own so the channel can be mocked.
@@ -91,6 +99,11 @@ class SafetyCenterScreen extends StatefulWidget {
 
   /// Handler for the log's retry control, or null for no control.
   final VoidCallback? onRetryLog;
+
+  /// What the composition root built for MCP. Null means this screen has not
+  /// been told, and says so; it does not assume "no servers configured", which
+  /// is a different and much stronger claim.
+  final McpWiring? mcp;
 
   @override
   State<SafetyCenterScreen> createState() => _SafetyCenterScreenState();
@@ -296,6 +309,27 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
               ),
               const SizedBox(height: 12),
               _buildLog(),
+              const SizedBox(height: 28),
+              const Text(
+                'MCP servers',
+                style: TextStyle(
+                  color: Color(0xFFE5E5E5),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Read from your own configuration, never from a default server',
+                style: TextStyle(
+                  color: Color(0xFF888888),
+                  fontSize: 12,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _McpPanel(wiring: widget.mcp),
               const SizedBox(height: 28),
               const Text(
                 'Policy toggles',
@@ -704,4 +738,109 @@ class _SwitchRow extends StatelessWidget {
 String _clockOf(DateTime value) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${two(value.hour)}:${two(value.minute)}:${two(value.second)}';
+}
+
+/// The MCP capability this build actually has.
+///
+/// Three states, and the difference between them is the whole point: a build
+/// that could not open its configuration store is NOT the same as a build with
+/// no servers configured, and neither is the same as a list of servers the user
+/// really entered. Collapsing any of them into "MCP: none" would tell the user
+/// their configuration was empty when in fact the app could not read it.
+class _McpPanel extends StatelessWidget {
+  const _McpPanel({required this.wiring});
+
+  final McpWiring? wiring;
+
+  @override
+  Widget build(BuildContext context) {
+    final McpWiring? wiring = this.wiring;
+    if (wiring == null) {
+      return const _McpNotice(
+        'MCP status is unknown: nothing wired this screen to the app\'s '
+        'configuration.',
+      );
+    }
+    if (wiring case final McpWiringFailed failure) {
+      return _McpNotice('MCP is unavailable. ${failure.reason}');
+    }
+    final McpComposition composition = (wiring as McpWired).composition;
+    return FutureBuilder<List<McpServerSettings>>(
+      future: composition.configuredServers(),
+      builder: (BuildContext context, AsyncSnapshot<List<McpServerSettings>> snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const _McpNotice('Reading your MCP server configuration…');
+        }
+        if (snapshot.hasError) {
+          return _McpNotice(
+            'The MCP server configuration could not be read: '
+            '${snapshot.error}',
+          );
+        }
+        final List<McpServerSettings> servers =
+            snapshot.data ?? const <McpServerSettings>[];
+        if (servers.isEmpty) {
+          return const _McpNotice(
+            'No MCP server is configured. Noir does not ship a default one, so '
+            'it has no MCP capability until you add one.',
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            for (final McpServerSettings server in servers)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '${server.displayName} — ${server.transportKind}, '
+                  '${server.allowedTools.length} allowed tool(s)',
+                  style: const TextStyle(
+                    color: Color(0xFFB0B0B0),
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            const Text(
+              'A tool call is refused unless the tool is on the allowlist and '
+              'the PolicyEngine allows it. High-risk tools also need a '
+              'confirmation this build can collect but a biometric it cannot.',
+              style: TextStyle(
+                color: Color(0xFF5A5A5A),
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _McpNotice extends StatelessWidget {
+  const _McpNotice(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D0D0D),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF1A1A1A)),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFF888888),
+          fontSize: 12,
+          height: 1.5,
+        ),
+      ),
+    );
+  }
 }

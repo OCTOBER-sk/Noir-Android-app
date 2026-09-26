@@ -1348,6 +1348,25 @@ void main() {
       expect(safety.requiresGate, isTrue);
     });
 
+    test('a verb inside another word is not a verb', () {
+      // "focus_input" carries the HTTP verb "put" inside the word "input". A
+      // substring match reads that as a destructive tool at risk 3, which then
+      // demands a biometric this build cannot perform and can never run. Only a
+      // word-anchored match counts, so this is the screen-bound tool it is.
+      final McpToolSafety safety = classifier.classifyTool(
+        name: 'focus_input',
+        description: 'focuses the composer field',
+      );
+
+      expect(safety.uiBound, isTrue);
+      expect(safety.destructive, isFalse);
+      expect(safety.backgroundSafe, isFalse);
+      expect(safety.requiresGate, isTrue);
+      expect(safety.suggestedRiskLevel, 1);
+      expect(safety.tier, RiskTier.STANDARD);
+      expect(safety.basis, 'name-heuristic');
+    });
+
     test('an unclassifiable tool fails closed at HIGH_RISK', () {
       final McpToolSafety safety = classifier.classifyTool(name: 'mystery');
 

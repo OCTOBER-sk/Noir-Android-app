@@ -234,7 +234,9 @@ class McpComposition {
     try {
       return await building;
     } finally {
-      _building.remove(serverId);
+      // The build future is the one already awaited above; removing it from the
+      // in-flight map hands the entry back rather than starting a second build.
+      unawaited(_building.remove(serverId));
     }
   }
 

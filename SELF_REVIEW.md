@@ -73,18 +73,17 @@
 | R2/B3 — Model Router (live refresh, rotation normal event) | ✅ FIXED | `model_router.dart` uses `FreeModelCache` |
 | R3/C1 — Enhanced AccessibilityService (node dump metadata) | ✅ FIXED | `AgentAccessibilityService.kt` `extractNodeDump()` |
 | R3/C2 — PolicyEngine gate before every `dispatchGesture` | ✅ FIXED | `MainActivity.kt` `evaluateGate()` + error response |
-| R4/D2 — Command Centre wired to `NoirUiEvent` | ✅ PARTIAL | Widget exists; full `Stream` subscription needs integration |
+| R4/D2 — Command Centre wired to `NoirUiEvent` | ✅ FIXED | `command_centre_screen.dart` subscribes to the controller stream and drives an injected responder's delta stream |
 | R4/D15 — Undo Toast (monochrome, countdown, no color urgency) | ✅ FIXED | `UndoToast` widget added |
-| R4/D3 — Live Task View timeline | ⚠️ PARTIAL | `TaskController` exists; separate screen file not created |
+| R4/D3 — Live Task View timeline | ✅ FIXED | `lib/ui/live_task_view.dart` created on injected state |
 | R5/E4 — Visual injection matrix (100% pass) | ✅ FIXED | `test/agent_test.dart` real assertions |
 | R5/E10 — Provider/budget tests (real assertions) | ✅ FIXED | `test/providers_test.dart` real assertions |
 
 ---
 
 ## 5. Remaining minor gaps (acknowledged)
-- **D2 full interactive streaming**: Skeleton loader exists; live token-by-token reveal requires `Stream` wiring (not fully implemented in this fix pass — user selected verify + fix security/runtime/providers first).
-- **D3 Live Task View**: `TaskController` real; dedicated Flutter screen not added. Non-blocking per user priority.
-- **D6 Usage Dashboard / D7 Skill Manager / D9 Safety Center**: Skeleton widgets exist; no major backend gaps remaining.
+- **Production backend wiring**: Command Centre streaming, Live Task View, Usage Dashboard, Skill Manager and Safety Center all have real screens and real tests, but no production backend is bound to them yet — they render their empty/injected states at runtime until one is.
+- **D6 Usage Dashboard / D7 Skill Manager / D9 Safety Center**: Screens now take injected state (`UsageSnapshot`, `SkillRecord`, policy gate) and show loading/empty/error states instead of fabricated numbers. No backend still feeds them in production.
 - **Native Android integration (MethodChannel)**: `MainActivity.kt` gate enforced; full `dispatchGesture()` integration with real `AccessibilityService` call requires runtime testing on device.
 
 ---

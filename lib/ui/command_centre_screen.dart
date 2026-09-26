@@ -2,8 +2,9 @@
 // Professional, crystal-clear, real backend contracts only. Zero mock/fake data.
 //
 // Lifecycle: the screen owns a ConversationController (unless one is injected),
-// subscribes to its event stream, renders controller state as messages, and
-// routes every visible control to a real handler or an explicitly disabled state.
+// subscribes to its event stream, renders controller state as messages, drives
+// the injected assistant backend's delta stream, and routes every visible
+// control to a real handler or an explicitly disabled state.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -24,10 +25,17 @@ import 'safety_center_screen.dart';
 /// [ConversationController.stopActiveStream] when finished. Production wires no
 /// responder yet, so the screen reports that nothing was generated instead of
 /// inventing a reply. Tests inject a responder to drive the real streaming path.
-typedef AssistantResponder = void Function(
-  String prompt,
-  ConversationController controller,
-);
+typedef AssistantResponder =
+    void Function(String prompt, ConversationController controller);
+
+/// Produces the assistant's answer to [prompt] as a stream of text deltas.
+///
+/// The screen owns the conversation: it opens the assistant turn on the injected
+/// [ConversationController], appends every delta to it, and closes the turn when
+/// the stream ends, errors, or is cancelled. A backend that cannot answer must
+/// fail its own stream — quietly returning an empty one would be indistinguishable
+/// from a successful reply that said nothing.
+typedef AssistantReplyStream = Stream<String> Function(String prompt);
 
 /// One row of the Command Centre timeline, in submission order.
 sealed class _TimelineItem {
@@ -57,6 +65,7 @@ class CommandCentreScreen extends StatefulWidget {
     super.key,
     this.controller,
     this.responder,
+    this.replyStream,
     this.usage,
     this.bridge,
   });
@@ -67,6 +76,12 @@ class CommandCentreScreen extends StatefulWidget {
 
   /// Null means "no assistant backend connected" — never a fabricated reply.
   final AssistantResponder? responder;
+
+  /// The real assistant backend, as a delta stream per prompt. Null (with a null
+  /// [responder]) means the same thing it means for [responder]: nothing is
+  /// connected, and the screen says so instead of inventing an answer. When both
+  /// are supplied the [responder] drives the turn and this stream is ignored.
+  final AssistantReplyStream? replyStream;
 
   /// Null means no usage has been recorded by a tracker yet.
   final UsageTracker? usage;
@@ -85,6 +100,12 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
     with TickerProviderStateMixin {
   static const String _noBackendNote =
       'No assistant backend is connected — nothing was generated.';
+  static const String _emptyReplyNote = 'The assistant returned no content.';
+  static const String _streamFailedNote = 'The assistant stream failed:';
+  static const String _cancelledNote =
+      'Cancelled — the assistant stream was stopped.';
+  static const String _closedNote =
+      'This conversation is closed — nothing was sent.';
 
   final TextEditingController _composer = TextEditingController();
   final FocusNode _composerFocus = FocusNode();
@@ -96,6 +117,10 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
   late bool _ownsController;
   late AccessibilityStatusController _accessibility;
   StreamSubscription<NoirUiEvent>? _events;
+
+  /// The live subscription to the injected assistant backend, while one is
+  /// running. Cancelled on stop, on failure, and on unmount.
+  StreamSubscription<String>? _replySubscription;
   bool _showSkeleton = false;
   bool _pipelineStreaming = false;
   late final AnimationController _loaderAnim = AnimationController(
@@ -170,6 +195,7 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
   /// Cancels the event subscription and closes the controller only if this
   /// screen owns it. Safe to call more than once.
   void _unbindController() {
+    _cancelReplySubscription();
     final subscription = _events;
     _events = null;
     if (subscription != null) {
@@ -230,8 +256,7 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
 
   void _handleActionButton() {
     if (_controller.hasActiveStream) {
-      _controller.stopActiveStream();
-      setState(() {});
+      _stopActiveStream();
       return;
     }
 
@@ -240,20 +265,116 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
       return;
     }
 
+    if (_controller.isClosed) {
+      // The controller can be closed by whoever owns it while this screen is
+      // still mounted. Report it rather than letting the submit throw.
+      setState(() => _timeline.add(const _SystemNoteItem(_closedNote)));
+      return;
+    }
+
     final submitted = _controller.submitUserMessage(prompt);
     _composer.clear();
 
     final responder = widget.responder;
+    final replyStream = widget.replyStream;
     setState(() {
       _addMessageItem(submitted.id);
-      if (responder == null) {
+      if (responder == null && replyStream == null) {
         _timeline.add(const _SystemNoteItem(_noBackendNote));
       }
     });
     if (responder != null) {
       responder(prompt, _controller);
+    } else if (replyStream != null) {
+      _startReply(prompt, replyStream);
     }
     _scrollToEnd();
+  }
+
+  /// Opens an assistant turn and pipes the backend's deltas into it. The
+  /// controller stays the single source of truth for the turn's text, so the
+  /// timeline cannot drift from what the conversation actually holds.
+  void _startReply(String prompt, AssistantReplyStream replyStream) {
+    Stream<String> deltas;
+    try {
+      deltas = replyStream(prompt);
+    } on Object catch (error) {
+      // A backend that cannot even be asked has failed; say so.
+      _failReply(error);
+      return;
+    }
+
+    final messageId = _controller.beginAssistantMessage();
+    _replySubscription = deltas.listen(
+      (String delta) {
+        if (!mounted) {
+          return;
+        }
+        _controller.appendAssistantDelta(messageId, delta);
+      },
+      onError: _failReply,
+      onDone: () => _completeReply(messageId),
+      cancelOnError: true,
+    );
+  }
+
+  /// A stream that ended on its own. An assistant turn that produced nothing is
+  /// reported as such instead of rendering as an empty message.
+  void _completeReply(String messageId) {
+    _replySubscription = null;
+    final message = _controller.messageById(messageId);
+    if (_controller.hasActiveStream) {
+      _controller.stopActiveStream();
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (message == null || message.text.trim().isEmpty) {
+        _timeline.add(const _SystemNoteItem(_emptyReplyNote));
+      }
+    });
+    _scrollToEnd();
+  }
+
+  /// The backend failed. Whatever had genuinely arrived is kept, the turn is
+  /// closed, and the reason is spelled out on the timeline.
+  void _failReply(Object error) {
+    _cancelReplySubscription();
+    if (_controller.hasActiveStream) {
+      _controller.stopActiveStream();
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _timeline.add(_SystemNoteItem('$_streamFailedNote $error'));
+    });
+    _scrollToEnd();
+  }
+
+  /// The user pressed stop. The turn is closed, the backend is detached, and the
+  /// timeline says the stream was cancelled rather than quietly going quiet.
+  void _stopActiveStream() {
+    _cancelReplySubscription();
+    if (_controller.hasActiveStream) {
+      _controller.stopActiveStream();
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _timeline.add(const _SystemNoteItem(_cancelledNote));
+    });
+    _scrollToEnd();
+  }
+
+  void _cancelReplySubscription() {
+    final subscription = _replySubscription;
+    _replySubscription = null;
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
   }
 
   void _prefillComposer(String prompt) {
@@ -348,10 +469,7 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
       if (message == null) {
         return const SizedBox.shrink();
       }
-      return _ConversationRow(
-        message: message,
-        loaderAnimation: _loaderAnim,
-      );
+      return _ConversationRow(message: message, loaderAnimation: _loaderAnim);
     }
     if (item is _PipelineEventItem) {
       return _MessageRow(event: item.event);
@@ -438,12 +556,12 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
           shape: BoxShape.circle,
           gradient: canAct
               ? isStop
-                  ? const LinearGradient(
-                      colors: [Color(0xFF333333), Color(0xFF1A1A1A)],
-                    )
-                  : const LinearGradient(
-                      colors: [Color(0xFFE5E5E5), Color(0xFFFFFFFF)],
-                    )
+                    ? const LinearGradient(
+                        colors: [Color(0xFF333333), Color(0xFF1A1A1A)],
+                      )
+                    : const LinearGradient(
+                        colors: [Color(0xFFE5E5E5), Color(0xFFFFFFFF)],
+                      )
               : const LinearGradient(
                   colors: [Color(0xFF1A1A1A), Color(0xFF1A1A1A)],
                 ),
@@ -519,10 +637,7 @@ class _HeaderBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1A1A1A),
                   borderRadius: BorderRadius.circular(4),
@@ -720,7 +835,8 @@ class _EmptyState extends StatelessWidget {
               _ActionChip(
                 icon: Icons.search_rounded,
                 label: 'Search web',
-                onPressed: () => onSuggestionSelected('Search the web for Noir.'),
+                onPressed: () =>
+                    onSuggestionSelected('Search the web for Noir.'),
               ),
               const SizedBox(width: 8),
               _ActionChip(
@@ -736,6 +852,27 @@ class _EmptyState extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The shared "rainbow-shifting" accent behind the tiny loader tip and the undo
+/// countdown.
+///
+/// The cycle rotates the colour list rather than moving the stops: gradient
+/// stops must be non-decreasing, so shifting them modulo 1.0 builds a stop list
+/// that does not even match its own colours (7 colours, 4 stops) and throws
+/// during paint the first time the loader is ever shown.
+LinearGradient _cyclingAccent(Animation<double> animation) {
+  const List<Color> colors = NoirColors.rainbowAccent;
+  final int step = (animation.value * colors.length).floor() % colors.length;
+  return LinearGradient(
+    colors: <Color>[
+      for (int i = 0; i < colors.length; i++)
+        colors[(i + step) % colors.length],
+    ],
+    stops: <double>[
+      for (int i = 0; i < colors.length; i++) i / (colors.length - 1),
+    ],
+  );
 }
 
 /// Animated skeleton loader with smooth rainbow gradient tip — real contract-bound.
@@ -778,15 +915,7 @@ class _SkeletonLoader extends StatelessWidget {
                 width: 50,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(2),
-                  gradient: LinearGradient(
-                    colors: NoirColors.rainbowAccent,
-                    stops: [
-                      0.0,
-                      (animation.value * 0.9) % 1.0,
-                      ((animation.value * 0.9) + 0.1) % 1.0,
-                      1.0,
-                    ],
-                  ),
+                  gradient: _cyclingAccent(animation),
                 ),
               ),
             ],
@@ -1031,10 +1160,7 @@ class _UsageRow extends StatelessWidget {
           Expanded(
             child: Text(
               'Responding with ${event.model}',
-              style: const TextStyle(
-                color: Color(0xFFB0B0B0),
-                fontSize: 12,
-              ),
+              style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12),
             ),
           ),
           Expanded(
@@ -1093,18 +1219,12 @@ class _ConfirmationCard extends StatelessWidget {
             children: [
               Text(
                 'Tool: ${event.toolName}',
-                style: const TextStyle(
-                  color: Color(0xFFB0B0B0),
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12),
               ),
               const SizedBox(width: 12),
               Text(
                 'Sanitized: ${event.screenContentWasSanitized ? 'Yes' : 'No'}',
-                style: const TextStyle(
-                  color: Color(0xFFB0B0B0),
-                  fontSize: 12,
-                ),
+                style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12),
               ),
             ],
           ),
@@ -1124,17 +1244,11 @@ class _ConfirmationCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _CardActionButton(
-                  label: 'Confirm',
-                  filled: true,
-                ),
+                child: _CardActionButton(label: 'Confirm', filled: true),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _CardActionButton(
-                  label: 'Cancel',
-                  filled: false,
-                ),
+                child: _CardActionButton(label: 'Cancel', filled: false),
               ),
             ],
           ),
@@ -1170,10 +1284,7 @@ class _ConfirmationCard extends StatelessWidget {
 
 /// Card action that is either wired to a real handler or visibly disabled.
 class _CardActionButton extends StatelessWidget {
-  const _CardActionButton({
-    required this.label,
-    required this.filled,
-  });
+  const _CardActionButton({required this.label, required this.filled});
 
   final String label;
   final bool filled;
@@ -1293,9 +1404,7 @@ class _UndoActionButton extends StatelessWidget {
         height: 28,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            border: Border.fromBorderSide(
-              BorderSide(color: Color(0xFF3A3A3A)),
-            ),
+            border: Border.fromBorderSide(BorderSide(color: Color(0xFF3A3A3A))),
             borderRadius: BorderRadius.all(Radius.circular(8)),
           ),
           child: Center(
@@ -1353,15 +1462,7 @@ class _AnimatedRainbowCountdownState extends State<AnimatedRainbowCountdown>
         height: 44,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(2),
-          gradient: LinearGradient(
-            colors: NoirColors.rainbowAccent,
-            stops: [
-              0.0,
-              (_ctrl.value * 0.8) % 1.0,
-              ((_ctrl.value * 0.8) + 0.2) % 1.0,
-              1.0,
-            ],
-          ),
+          gradient: _cyclingAccent(_ctrl),
         ),
       ),
     );

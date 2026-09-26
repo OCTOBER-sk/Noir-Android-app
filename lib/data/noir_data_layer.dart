@@ -7,6 +7,7 @@
 
 import 'dart:io';
 
+import 'automation_repository.dart';
 import 'collections.dart';
 import 'conversation_repository.dart';
 import 'job_repository.dart';
@@ -35,6 +36,7 @@ class NoirDataLayer {
     required this.usage,
     required this.jobs,
     required this.mcpServers,
+    required this.automations,
   });
 
   /// The clock the layer stamps records with.
@@ -143,6 +145,11 @@ class NoirDataLayer {
         clock: clock,
         maxPageLimit: maxPageLimit,
       ),
+      automations: DurableAutomationRepository(
+        store: store,
+        clock: clock,
+        maxPageLimit: maxPageLimit,
+      ),
     );
   }
 
@@ -163,6 +170,11 @@ class NoirDataLayer {
   /// The MCP servers a user configured. Empty means the app has no MCP adapter
   /// to build, and both the composition root and the Safety Center say so.
   final McpServerRepository mcpServers;
+
+  /// The scheduled automations in `lib/automations`, and their append-only
+  /// revision history. Empty until a user creates a job, because nothing here
+  /// invents one.
+  final DurableAutomationRepository automations;
 
   /// Every record in every collection, with provider secrets redacted.
   ///
@@ -232,6 +244,12 @@ class NoirDataLayer {
             days: 30,
             onUnreadable: _ignore,
           )).buckets.map((bucket) => bucket.toString()).toList(),
+        },
+        NoirCollections.automations: <String, Object?>{
+          'items': await automations.exportJobs(onUnreadable: _ignore),
+        },
+        NoirCollections.automationHistory: <String, Object?>{
+          'items': await automations.exportHistory(onUnreadable: _ignore),
         },
       },
       'recoveries': <String>[

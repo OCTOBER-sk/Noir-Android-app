@@ -29,7 +29,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noir_android_app/agent/agent_runtime.dart';
 import 'package:noir_android_app/agent/cost_estimator.dart';
+import 'package:noir_android_app/automations/automations.dart';
 import 'package:noir_android_app/core/agent_wiring.dart';
+import 'package:noir_android_app/core/automation_wiring.dart';
 import 'package:noir_android_app/core/composition_root.dart';
 import 'package:noir_android_app/core/conversation_controller.dart';
 import 'package:noir_android_app/core/mcp_composition.dart';
@@ -177,6 +179,21 @@ void main() {
       expect(app.mcp, isA<McpWired>());
       expect(app.jobs, isA<JobRepository>());
 
+      // The scheduled automations, and the collaborators behind them: the one
+      // PolicyEngine in the process, and the graph's own runAutomation as the
+      // executor, so a job is gated exactly like a tap.
+      final AutomationsWired automations = app.automations as AutomationsWired;
+      expect(automations.service, isA<AutomationService>());
+      expect(automations.gate, isA<PolicyEngineAutomationGate>());
+      expect(automations.executor, isA<ConsentGatedAutomationExecutor>());
+      expect(automations.service.gate, same(automations.gate));
+      expect(automations.service.executor, same(automations.executor));
+      expect(
+        automations.repository,
+        same((app.data as DataOpened).layer.automations),
+      );
+      expect(automations.repository.isDurable, isTrue);
+
       // The deterministic A6a sanitizer is the one bound into the pipeline,
       // not a default that happens to be the same shape.
       expect(app.sanitize, same(Sanitizer.sanitize));
@@ -211,6 +228,7 @@ void main() {
         expect(app.memory, isA<MemoryUnavailable>());
         expect(app.mcp, isA<McpWiringFailed>());
         expect(app.jobs, isNull);
+        expect(app.automations, isA<AutomationsUnavailable>());
       },
     );
   });
@@ -751,6 +769,8 @@ void main() {
         final List<String> sources = <String>[
           'lib/core/composition_root.dart',
           'lib/core/agent_wiring.dart',
+          'lib/core/automation_wiring.dart',
+          'lib/data/automation_repository.dart',
           'lib/data/memory_store_bridge.dart',
           'lib/data/usage_store_bridge.dart',
           'lib/ui/operations_sheet.dart',

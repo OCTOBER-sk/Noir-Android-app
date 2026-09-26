@@ -29,6 +29,12 @@ abstract final class NoirSchema {
   /// token behind a secret reference, so there is no plaintext migration to do.
   static const int mcpServersVersion = 1;
 
+  /// Scheduled automations are at v1, and their revision history is at v1: both
+  /// are first shapes, so there is nothing to migrate from.
+  static const int automationsVersion = 1;
+
+  static const int automationHistoryVersion = 1;
+
   /// Builds the catalog. [secrets] is required for the provider-settings
   /// migration: it is the boundary that moves a v1 plaintext key out of the
   /// record and behind the secret provider.
@@ -96,6 +102,18 @@ abstract final class NoirSchema {
       CollectionSchema(
         name: NoirCollections.mcpServers,
         currentVersion: mcpServersVersion,
+      ),
+    );
+    catalog.register(
+      CollectionSchema(
+        name: NoirCollections.automations,
+        currentVersion: automationsVersion,
+      ),
+    );
+    catalog.register(
+      CollectionSchema(
+        name: NoirCollections.automationHistory,
+        currentVersion: automationHistoryVersion,
       ),
     );
     return catalog;

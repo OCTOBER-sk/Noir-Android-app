@@ -44,6 +44,13 @@ class AutomationError implements Exception {
   /// A blank instruction for the executor.
   static const String emptyAction = 'EMPTY_ACTION';
 
+  /// An instruction the executor cannot read as a request.
+  ///
+  /// Not a blank one: the action is there, and it is still not something that
+  /// can be run. Whoever composes an executor decides what a valid action looks
+  /// like and reports this rather than guessing at the intent.
+  static const String invalidAction = 'INVALID_ACTION';
+
   /// The schedule cannot describe a real future run.
   static const String invalidSchedule = 'INVALID_SCHEDULE';
 

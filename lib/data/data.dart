@@ -1,6 +1,7 @@
 // lib/data/data.dart — public surface of the Noir data layer.
 library;
 
+export 'automation_repository.dart';
 export 'codecs.dart';
 export 'collections.dart';
 export 'collection_repository.dart';

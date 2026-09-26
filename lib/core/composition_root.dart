@@ -21,6 +21,10 @@
 //             provider settings — never a default endpoint or a default key
 //   mcp       McpComposition over the persisted MCP server records and the
 //             single PolicyEngine
+//   automations AutomationService over the durable automations collection, the
+//             single PolicyEngine, and an executor that goes through
+//             runAutomation — so a scheduled job is gated per run exactly like a
+//             manual one
 //   safety    RiskClassifier, PolicyEngine, Sanitizer, ConsentGate,
 //             CountdownUndoWindow, ScreenPlanner, NativeGestureExecutor,
 //             SanitizingRecoveryEngine, AgentRuntimePipeline
@@ -45,6 +49,7 @@ import 'package:flutter/foundation.dart';
 
 import '../agent/agent_runtime.dart';
 import '../agent/cost_estimator.dart';
+import '../automations/automations.dart';
 import '../data/data.dart';
 import '../data/memory_store_bridge.dart';
 import '../data/usage_store_bridge.dart';
@@ -54,7 +59,6 @@ import '../prompts/prompt_service.dart';
 import '../providers/adapters/mcp_transport_factory.dart';
 import '../providers/adapters/openrouter_adapter.dart';
 import '../providers/auth_config.dart';
-import '../providers/cancellation.dart';
 import '../providers/chat_types.dart';
 import '../providers/errors.dart';
 import '../providers/model_discovery.dart';
@@ -76,6 +80,7 @@ import '../ui/skill_manager_screen.dart';
 import '../ui/usage_dashboard_screen.dart';
 import 'agent_wiring.dart';
 import 'assistant_bridge.dart';
+import 'automation_wiring.dart';
 import 'clock.dart';
 
 export 'agent_wiring.dart'
@@ -105,6 +110,7 @@ const String kUsageStartupSubsystem = 'usage';
 const String kProviderStartupSubsystem = 'provider';
 const String kSafetyPipelineStartupSubsystem = 'safety-pipeline';
 const String kMcpStartupSubsystem = 'mcp';
+const String kAutomationsStartupSubsystem = 'automations';
 const String kAssistantStartupSubsystem = 'assistant';
 const String kTranscriptStartupSubsystem = 'transcript';
 
@@ -382,6 +388,95 @@ final class CostPlan {
   }
 }
 
+/// --- scheduled automations -------------------------------------------------
+
+/// What the composition managed to build for `lib/automations`.
+///
+/// Sealed for the same reason as every other wiring here: a caller has to say
+/// whether it holds a real service or a stated absence, so "the subsystem is
+/// missing" can never be read as "the subsystem is empty and fine".
+sealed class AutomationWiring {
+  const AutomationWiring();
+}
+
+/// The scheduler is running over the durable automations collection.
+///
+/// [gate] is the one [PolicyEngine] in the process and [executor] is the graph's
+/// own `runAutomation`, so a scheduled job is scored by the same rules as a
+/// manual one and has to be confirmed by a human before it reaches the
+/// platform. [service] holds those very instances, not copies of them.
+final class AutomationsWired extends AutomationWiring {
+  const AutomationsWired({
+    required this.service,
+    required this.repository,
+    required this.gate,
+    required this.executor,
+  });
+
+  /// The real scheduler. `service.gate` and `service.executor` are [gate] and
+  /// [executor] below, so there is one gate and one executor in the graph.
+  final AutomationService service;
+
+  /// Where the jobs and their append-only history actually live.
+  final DurableAutomationRepository repository;
+
+  final PolicyEngineAutomationGate gate;
+  final ConsentGatedAutomationExecutor executor;
+
+  @override
+  String toString() =>
+      'AutomationsWired(${repository.collection}, durable: '
+      '${repository.isDurable})';
+}
+
+/// There is nowhere to keep a job, so nothing is scheduled.
+///
+/// A job that could not be stored would be a job the user believes exists and
+/// that never runs, so the app says the subsystem is unavailable rather than
+/// holding a service over a store it does not have.
+final class AutomationsUnavailable extends AutomationWiring {
+  const AutomationsUnavailable(this.reason);
+
+  final String reason;
+
+  @override
+  String toString() => 'AutomationsUnavailable($reason)';
+}
+
+/// What one scheduler pass did.
+///
+/// Sealed so "nothing was due" and "there was no scheduler" cannot be confused:
+/// the first is a fact about the clock, the second is a missing capability, and
+/// only one of them is something the user asked for.
+sealed class AutomationDispatch {
+  const AutomationDispatch();
+}
+
+/// Every job that was due was offered to the gate, and these are the runs it
+/// produced — including the ones the gate denied or a user refused.
+final class AutomationDispatched extends AutomationDispatch {
+  AutomationDispatched(List<AutomationRun> runs)
+    : runs = List<AutomationRun>.unmodifiable(runs);
+
+  final List<AutomationRun> runs;
+
+  /// Whether no job was due, as opposed to runs that were refused.
+  bool get nothingWasDue => runs.isEmpty;
+
+  @override
+  String toString() => 'AutomationDispatched(${runs.length} run(s))';
+}
+
+/// Nothing ran because there is no scheduler to run with.
+final class AutomationDispatchUnavailable extends AutomationDispatch {
+  const AutomationDispatchUnavailable(this.reason);
+
+  final String reason;
+
+  @override
+  String toString() => 'AutomationDispatchUnavailable($reason)';
+}
+
 /// The whole application graph, assembled once at startup.
 ///
 /// Construction never throws and never fabricates: every step that could fail
@@ -412,6 +507,7 @@ class NoirComposition extends ChangeNotifier {
     required this.data,
     required this.memory,
     required this.mcp,
+    required this.automations,
     required this.provider,
     required this.jobs,
     required this.journal,
@@ -482,6 +578,12 @@ class NoirComposition extends ChangeNotifier {
   final DataWiring data;
   final MemoryWiring memory;
   final McpWiring mcp;
+
+  /// The scheduled automation subsystem: a real [AutomationService] over durable
+  /// records, or a stated reason there is none. Never a fabricated service and
+  /// never silently absent.
+  final AutomationWiring automations;
+
   final ProviderWiring provider;
 
   /// Scheduled jobs, when the data layer opened. Null otherwise.
@@ -803,12 +905,66 @@ class NoirComposition extends ChangeNotifier {
       },
     );
 
+    // --- scheduled automations --------------------------------------------
+    // The scheduler, the gate and the executor are three separate decisions and
+    // all three are made here rather than defaulted anywhere:
+    //
+    //   * the repository is the durable one, so a job a user created is still
+    //     there after a restart;
+    //   * the gate is this graph's *own* PolicyEngine and RiskClassifier, the
+    //     same pair the platform calls back into and the pipeline scores with, so
+    //     a scheduled job gets no privilege a manual one would not get;
+    //   * the executor is the graph's own `runAutomation`, so a due job is
+    //     classified, published for confirmation and only then allowed to touch
+    //     the platform. It is late-bound for the same reason [reportTurn] is: a
+    //     job cannot be dispatched before [open] has returned, by which time the
+    //     graph exists.
+    late final NoirComposition composition;
+    final PolicyEngineAutomationGate automationGate =
+        PolicyEngineAutomationGate(
+          policy: policy,
+          riskClassifier: riskClassifier,
+        );
+    final ConsentGatedAutomationExecutor automationExecutor =
+        ConsentGatedAutomationExecutor(
+          run: (AutomationRequest request) =>
+              composition.runAutomation(request),
+        );
+    final AutomationWiring automations;
+    if (layer == null) {
+      automations = AutomationsUnavailable(
+        'A scheduled job needs somewhere durable to live, and there is none: '
+        '$dataFailure',
+      );
+    } else {
+      automations = AutomationsWired(
+        repository: layer.automations,
+        gate: automationGate,
+        executor: automationExecutor,
+        service: AutomationService(
+          repository: layer.automations,
+          gate: automationGate,
+          executor: automationExecutor,
+          clock: clock,
+        ),
+      );
+    }
+    step(
+      kAutomationsStartupSubsystem,
+      ok: automations is AutomationsWired,
+      detail: switch (automations) {
+        AutomationsWired(:final DurableAutomationRepository repository) =>
+          'durable ${repository.collection} records, gated by the one '
+              'PolicyEngine, run through the consent-gated pipeline',
+        AutomationsUnavailable(:final String reason) => reason,
+      },
+    );
+
     // --- conversation and the assistant bridge ---------------------------
     // The bridge is built before the graph it belongs to, and reports through a
     // sink that reads the graph once it exists. A turn cannot start before [open]
     // returns, so the closure is never called with an unassigned graph.
     final ConversationController conversation = ConversationController();
-    late final NoirComposition composition;
     void reportTurn(AssistantTurnLog entry) => composition._logTurn(entry);
     final McpComposition? mcpComposition = mcp is McpWired
         ? mcp.composition
@@ -900,6 +1056,7 @@ class NoirComposition extends ChangeNotifier {
       data: data,
       memory: memory,
       mcp: mcp,
+      automations: automations,
       provider: provider,
       jobs: layer?.jobs,
       journal: layer == null
@@ -1155,7 +1312,8 @@ class NoirComposition extends ChangeNotifier {
   ///
   /// This is the only entry point to the pipeline, which is what keeps
   /// accessibility automation user-initiated: nothing reaches here except a
-  /// call from the UI on the user's behalf.
+  /// call from the UI on the user's behalf — or a scheduled job, whose executor
+  /// is this very method, so a job asks for the same consent a tap does.
   Future<RuntimeResult?> runAutomation(AutomationRequest request) async {
     if (_disposed) return null;
     taskRun.transitionTo(TaskState.planning);
@@ -1254,6 +1412,49 @@ class NoirComposition extends ChangeNotifier {
     }
   }
 
+  /// --- scheduled automations ----------------------------------------------
+
+  /// Offers every due scheduled job to the gate and runs what it approves.
+  ///
+  /// The app-facing seam for the scheduler. When the pass happens is the
+  /// caller's decision — this build has no platform alarm, so the tick has to
+  /// come from whatever owns one — and no job reaches the screen without the
+  /// same confirmation a manual run needs, so a background pass can do no more
+  /// than a foreground one.
+  ///
+  /// [AutomationDispatchUnavailable] when the subsystem is unavailable, and
+  /// never a fabricated empty result: "nothing was due" and "there is no
+  /// scheduler" are different facts and a caller has to be able to tell them
+  /// apart.
+  Future<AutomationDispatch> runDueAutomations({int? limit}) async {
+    if (_disposed) {
+      return const AutomationDispatchUnavailable(
+        'The graph is closed, so no job was offered to the gate.',
+      );
+    }
+    return switch (automations) {
+      AutomationsWired(:final AutomationService service) =>
+        AutomationDispatched(await service.runDueJobs(limit: limit)),
+      AutomationsUnavailable(:final String reason) =>
+        AutomationDispatchUnavailable(reason),
+    };
+  }
+
+  /// The scheduled jobs the durable repository holds, oldest id first.
+  ///
+  /// Empty when the subsystem is unavailable or the records cannot be read: the
+  /// store's recovery path holds the reason, and a listing that invented a
+  /// placeholder job would be worse than one that admits it has nothing.
+  Future<List<Automation>> scheduledAutomations() async {
+    final AutomationWiring wired = automations;
+    if (wired is! AutomationsWired) return const <Automation>[];
+    try {
+      return await wired.service.list();
+    } on Object {
+      return const <Automation>[];
+    }
+  }
+
   /// --- UI state sources ---------------------------------------------------
 
   /// Real usage, as the dashboard's own states.
@@ -1289,13 +1490,16 @@ class NoirComposition extends ChangeNotifier {
     _usageStates.add(UsageAvailable(snapshot));
   }
 
-  /// Registered automations, read from the scheduled-jobs collection.
+  /// Registered automations, read from the durable records this graph holds.
   ///
-  /// A scheduled job is the closest thing this build has to a named automation:
-  /// the user created it, named it, and it has a lifecycle (unknown until it
-  /// has run, active while scheduled, needs review when its last run failed,
-  /// disabled when switched off). The mapping is documented on [toSkillRecord]
-  /// and it never invents a run: a job with no run says so.
+  /// Two collections, because the app has two: the `lib/automations` jobs, which
+  /// the scheduler in [automations] dispatches behind the gate, and the legacy
+  /// scheduled jobs. Both are things a user created and named, and both have a
+  /// lifecycle (unknown until it has run, active while scheduled, needs review
+  /// when its last run failed, disabled when switched off). The mapping is
+  /// mechanical and documented on [ScheduledJobSkillState] and
+  /// [AutomationSkillState], and it never invents a run: a job with no run says
+  /// so.
   Stream<SkillListState> skills() {
     if (_disposed) return const Stream<SkillListState>.empty();
     unawaited(_publishSkills());
@@ -1326,6 +1530,18 @@ class NoirComposition extends ChangeNotifier {
       );
       _skills.add(
         SkillListAvailable(<SkillRecord>[
+          for (final Automation automation in await scheduledAutomations())
+            SkillRecord(
+              id: automation.id,
+              name: automation.name,
+              state: automation.toSkillState(),
+              lastUsedAt: automation.lastRunAt?.toUtc(),
+              detail:
+                  automation.lastError ??
+                  '${automation.schedule.kind.name} schedule, '
+                      '${automation.runCount} run(s), revision '
+                      '${automation.revision}',
+            ),
           for (final ScheduledJob job in records)
             SkillRecord(
               id: job.id,
@@ -1545,6 +1761,30 @@ extension ScheduledJobSkillState on ScheduledJob {
       return runCount == 0 ? SkillState.unknown : SkillState.validated;
     }
     if (lastError != null) return SkillState.needsReview;
+    return runCount == 0 ? SkillState.unknown : SkillState.active;
+  }
+}
+
+/// A scheduled automation as the skill registry's vocabulary.
+///
+/// The same mechanical mapping as [ScheduledJobSkillState], so a job the
+/// scheduler owns and a legacy scheduled job read alike in the Skill Manager:
+///
+///   * switched off                              -> [SkillState.disabled]
+///   * enabled, nothing run yet                  -> [SkillState.unknown]
+///   * ran clean, still scheduled                -> [SkillState.active]
+///   * finished a one-shot, ran clean             -> [SkillState.validated]
+///   * last run left an error behind             -> [SkillState.needsReview]
+///
+/// A claimed job reads as active: the claim is an in-flight run, and hiding that
+/// would make a job that is running right now look idle.
+extension AutomationSkillState on Automation {
+  SkillState toSkillState() {
+    if (!enabled) return SkillState.disabled;
+    if (lastError != null) return SkillState.needsReview;
+    if (nextRunAt == null) {
+      return runCount == 0 ? SkillState.unknown : SkillState.validated;
+    }
     return runCount == 0 ? SkillState.unknown : SkillState.active;
   }
 }

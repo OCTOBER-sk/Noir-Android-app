@@ -56,6 +56,8 @@ void main() {
         NoirCollections.memories,
         NoirCollections.usage,
         NoirCollections.jobs,
+        NoirCollections.automations,
+        NoirCollections.automationHistory,
       ]),
     );
   });
@@ -127,6 +129,34 @@ void main() {
         ),
       );
       await first.jobs.markCompleted('j1', at: DateTime.utc(2026, 6, 2, 3));
+      // A scheduled automation and the revision it opened with, written through
+      // the same durable repository the composition root hands the scheduler.
+      final Automation created = await first.automations.insert(
+        Automation(
+          id: 'a1',
+          name: 'Morning digest',
+          action: 'read_screen|Inbox',
+          schedule: AutomationSchedule.interval(
+            every: const Duration(hours: 12),
+          ),
+          enabled: true,
+          maxAttempts: 1,
+          createdBy: UserIntent(userId: 'u-1', requestedAt: clock()),
+          createdAt: clock(),
+          updatedAt: clock(),
+          revision: 1,
+          nextRunAt: DateTime.utc(2026, 6, 2, 20),
+        ),
+      );
+      await first.automations.appendRevision(
+        AutomationRevision(
+          automationId: created.id,
+          revision: 1,
+          change: AutomationChange.created,
+          recordedAt: clock(),
+          snapshot: created,
+        ),
+      );
 
       // A new layer over the same directory: this is the "app restarted" case.
       final second = await open();
@@ -145,6 +175,21 @@ void main() {
         (await second.jobs.find('j1'))!.nextRunAt,
         DateTime.utc(2026, 6, 3, 3),
       );
+      // The scheduled job came back with its schedule intact, and so did the
+      // revision that recorded who asked for it.
+      final Automation restored = (await second.automations.find('a1'))!;
+      expect(restored.name, 'Morning digest');
+      expect(restored.action, 'read_screen|Inbox');
+      expect(
+        restored.schedule,
+        AutomationSchedule.interval(every: const Duration(hours: 12)),
+      );
+      expect(restored.nextRunAt, DateTime.utc(2026, 6, 2, 20));
+      expect(restored.createdBy.userId, 'u-1');
+      final List<AutomationRevision> history = await second.automations
+          .revisions('a1');
+      expect(history, hasLength(1));
+      expect(history.single.change, AutomationChange.created);
     },
   );
 
@@ -202,6 +247,33 @@ void main() {
       ),
     );
     await layer.mcpServers.setToken('notes', mcpToken);
+    // A scheduled automation, with the revision that recorded its creation: an
+    // export that kept the job but dropped the trail would restore an app that
+    // ran a job and cannot say who asked for it or under which revision.
+    final Automation scheduled = await layer.automations.insert(
+      Automation(
+        id: 'a1',
+        name: 'Morning digest',
+        action: 'read_screen|Inbox',
+        schedule: AutomationSchedule.once(DateTime.utc(2026, 6, 2, 7)),
+        enabled: true,
+        maxAttempts: 2,
+        createdBy: UserIntent(userId: 'u-1', requestedAt: clock()),
+        createdAt: clock(),
+        updatedAt: clock(),
+        revision: 1,
+        nextRunAt: DateTime.utc(2026, 6, 2, 7),
+      ),
+    );
+    await layer.automations.appendRevision(
+      AutomationRevision(
+        automationId: scheduled.id,
+        revision: 1,
+        change: AutomationChange.created,
+        recordedAt: clock(),
+        snapshot: scheduled,
+      ),
+    );
 
     final export = await layer.exportRedactedSnapshot();
     final text = jsonEncode(export);
@@ -220,6 +292,8 @@ void main() {
       NoirCollections.jobs,
       NoirCollections.mcpServers,
       NoirCollections.usage,
+      NoirCollections.automations,
+      NoirCollections.automationHistory,
     });
     final providers =
         collections[NoirCollections.providerSettings]! as Map<String, Object?>;
@@ -237,6 +311,29 @@ void main() {
     expect(server['allowedTools'], <String>['read_note']);
     expect(server['secretConfigured'], isTrue);
     expect(server['secretRef'], redactedSecretPlaceholder);
+    // The scheduled job, in full, and the trail that says who asked for it.
+    final scheduledJobs =
+        collections[NoirCollections.automations]! as Map<String, Object?>;
+    final job =
+        (scheduledJobs['items']! as List<Object?>).single!
+            as Map<String, Object?>;
+    expect(job['id'], 'a1');
+    expect(job['action'], 'read_screen|Inbox');
+    expect(job['schedule'], 'once');
+    expect(job['requestedBy'], 'u-1');
+    expect(job['maxAttempts'], 2);
+    final trails =
+        collections[NoirCollections.automationHistory]! as Map<String, Object?>;
+    final trail =
+        (trails['items']! as List<Object?>).single! as Map<String, Object?>;
+    expect(trail['automationId'], 'a1');
+    expect(trail['revisionCount'], 1);
+    expect((trail['revisions']! as List<Object?>).single, <String, Object?>{
+      'revision': 1,
+      'change': 'created',
+      'recordedAt': isA<String>(),
+      'snapshotRevision': 1,
+    });
     expect(
       await layer.settings.recordsLeakingSecrets(<String>[secretValue]),
       isEmpty,

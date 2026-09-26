@@ -8,6 +8,7 @@
 package com.noir.android
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.graphics.Rect
 import android.os.Handler
@@ -16,6 +17,10 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+
+/** Runtime capability declared by the accessibility-service configuration. */
+private fun AccessibilityServiceInfo.hasGestureCapability(): Boolean =
+  (getCapabilities() and AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES) != 0
 
 class AgentAccessibilityService : AccessibilityService() {
 
@@ -85,7 +90,10 @@ class AgentAccessibilityService : AccessibilityService() {
   override fun onServiceConnected() {
     super.onServiceConnected()
     liveInstance = this
-    Log.i(TAG, "AccessibilityService connected; canPerformGestures=${serviceInfo?.canPerformGestures() ?: false}")
+    Log.i(
+      TAG,
+      "AccessibilityService connected; canPerformGestures=${serviceInfo?.hasGestureCapability() ?: false}"
+    )
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -249,7 +257,7 @@ class AgentAccessibilityService : AccessibilityService() {
     callback: AccessibilityService.GestureResultCallback
   ): Boolean {
     if (destroyed || liveInstance !== this) return false
-    if (serviceInfo?.canPerformGestures() != true) {
+    if (serviceInfo?.hasGestureCapability() != true) {
       Log.w(TAG, "canPerformGestures is not enabled; refusing to dispatch")
       return false
     }
@@ -272,8 +280,8 @@ class AgentAccessibilityService : AccessibilityService() {
     val nodes = latestNodes
     return mapOf(
       "serviceConnected" to (liveInstance === this),
-      "canPerformGestures" to (info?.canPerformGestures() ?: false),
-      "canRetrieveWindowContent" to (info?.canRetrieveWindowContent() ?: false),
+      "canPerformGestures" to (info?.hasGestureCapability() ?: false),
+      "canRetrieveWindowContent" to (info?.canRetrieveWindowContent ?: false),
       "hasNodeDump" to (nodes != null),
       "lastNodeCount" to (nodes?.size ?: 0),
       "runtimeSinkInstalled" to (runtimeSink != null)

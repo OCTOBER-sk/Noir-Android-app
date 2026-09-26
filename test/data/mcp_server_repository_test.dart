@@ -146,29 +146,35 @@ void main() {
   });
 
   group('the bearer token is a reference, never a value', () {
-    test('a token is filed in the secret store and only a ref is persisted',
-        () async {
-      await mcp.upsert(notesServer());
-      final saved = await mcp.setToken('notes', mcpToken);
+    test(
+      'a token is filed in the secret store and only a ref is persisted',
+      () async {
+        await mcp.upsert(notesServer());
+        final saved = await mcp.setToken('notes', mcpToken);
 
-      expect(saved.hasSecret, isTrue);
-      expect(saved.secretRef, mcpServerSecretRef('notes'));
-      expect(saved.secretValue, isNull);
-      expect(await secrets.read(mcpServerSecretRef('notes')), mcpToken);
-      expect(await mcp.resolveToken('notes'), mcpToken);
+        expect(saved.hasSecret, isTrue);
+        expect(saved.secretRef, mcpServerSecretRef('notes'));
+        expect(saved.secretValue, isNull);
+        expect(await secrets.read(mcpServerSecretRef('notes')), mcpToken);
+        expect(await mcp.resolveToken('notes'), mcpToken);
 
-      final raw = await (store as RawStoreAccess).rawEnvelope(
-        NoirCollections.mcpServers,
-        'notes',
-      );
-      expect(raw, contains(mcpServerSecretRef('notes')));
-      expect(raw, isNot(contains(mcpToken)), reason: 'the value is not in the record');
-      expect(
-        await mcp.recordsLeakingTokens(<String>[mcpToken]),
-        isEmpty,
-        reason: 'no stored envelope holds the token',
-      );
-    });
+        final raw = await (store as RawStoreAccess).rawEnvelope(
+          NoirCollections.mcpServers,
+          'notes',
+        );
+        expect(raw, contains(mcpServerSecretRef('notes')));
+        expect(
+          raw,
+          isNot(contains(mcpToken)),
+          reason: 'the value is not in the record',
+        );
+        expect(
+          await mcp.recordsLeakingTokens(<String>[mcpToken]),
+          isEmpty,
+          reason: 'no stored envelope holds the token',
+        );
+      },
+    );
 
     test('the redacted form replaces the ref and reports presence', () async {
       await mcp.upsert(notesServer());
@@ -260,13 +266,15 @@ void main() {
       await raw.damagePrimary(
         NoirCollections.mcpServers,
         'notes',
-        envelope.replaceFirst('"allowedTools"', '"token":"$mcpToken","allowedTools"'),
+        envelope.replaceFirst(
+          '"allowedTools"',
+          '"token":"$mcpToken","allowedTools"',
+        ),
       );
 
-      expect(
-        await mcp.recordsLeakingTokens(<String>[mcpToken]),
-        <String>['notes'],
-      );
+      expect(await mcp.recordsLeakingTokens(<String>[mcpToken]), <String>[
+        'notes',
+      ]);
     });
   });
 
@@ -341,7 +349,8 @@ void main() {
 
     test('a duplicated tool on the allowlist is refused', () {
       expect(
-        () => notesServer(allowedTools: const <String>['read_note', 'read_note']),
+        () =>
+            notesServer(allowedTools: const <String>['read_note', 'read_note']),
         throwsA(
           isA<InvalidDataError>().having(
             (e) => e.message,
@@ -352,22 +361,24 @@ void main() {
       );
     });
 
-    test('a background-safe declaration for a tool that is not allowed is refused',
-        () {
-      expect(
-        () => notesServer(
-          allowedTools: const <String>['read_note'],
-          backgroundSafeTools: const <String>['delete_everything'],
-        ),
-        throwsA(
-          isA<InvalidDataError>().having(
-            (e) => e.message,
-            'message',
-            contains('is not on the allowlist'),
+    test(
+      'a background-safe declaration for a tool that is not allowed is refused',
+      () {
+        expect(
+          () => notesServer(
+            allowedTools: const <String>['read_note'],
+            backgroundSafeTools: const <String>['delete_everything'],
           ),
-        ),
-      );
-    });
+          throwsA(
+            isA<InvalidDataError>().having(
+              (e) => e.message,
+              'message',
+              contains('is not on the allowlist'),
+            ),
+          ),
+        );
+      },
+    );
 
     test('a background-safe tool declared twice is refused', () {
       expect(
@@ -417,28 +428,35 @@ void main() {
       );
     });
 
-    test('a record whose stored fields are malformed is named, not defaulted',
-        () async {
-      await store.write(NoirCollections.mcpServers, 'broken', <String, Object?>{
-        'displayName': 'Broken',
-        'endpoint': 'https://mcp.example.test/x',
-        'transportKind': 'http',
-        'allowedTools': 'read_note',
-        'backgroundSafeTools': <String>[],
-        'createdAt': stamp.toIso8601String(),
-        'updatedAt': stamp.toIso8601String(),
-      });
+    test(
+      'a record whose stored fields are malformed is named, not defaulted',
+      () async {
+        await store
+            .write(NoirCollections.mcpServers, 'broken', <String, Object?>{
+              'displayName': 'Broken',
+              'endpoint': 'https://mcp.example.test/x',
+              'transportKind': 'http',
+              'allowedTools': 'read_note',
+              'backgroundSafeTools': <String>[],
+              'createdAt': stamp.toIso8601String(),
+              'updatedAt': stamp.toIso8601String(),
+            });
 
-      await expectLater(
-        mcp.find('broken'),
-        throwsA(
-          isA<MalformedRecordError>()
-              .having((e) => e.collection, 'collection', NoirCollections.mcpServers)
-              .having((e) => e.id, 'id', 'broken')
-              .having((e) => e.field, 'field', 'allowedTools'),
-        ),
-      );
-    });
+        await expectLater(
+          mcp.find('broken'),
+          throwsA(
+            isA<MalformedRecordError>()
+                .having(
+                  (e) => e.collection,
+                  'collection',
+                  NoirCollections.mcpServers,
+                )
+                .having((e) => e.id, 'id', 'broken')
+                .having((e) => e.field, 'field', 'allowedTools'),
+          ),
+        );
+      },
+    );
 
     test('a stored endpoint that is not http(s) is refused on read', () async {
       await store.write(NoirCollections.mcpServers, 'bad', <String, Object?>{

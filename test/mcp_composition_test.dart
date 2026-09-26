@@ -42,8 +42,8 @@ class RecordingTransportFactory implements McpTransportFactory {
   final List<FakeMcpTransport> transports = <FakeMcpTransport>[];
 
   /// Called for each connection. Defaults to the standard notes server script.
-  FakeMcpTransport Function(McpServerSettings server) build =
-      (_) => FakeMcpTransport()..responder = (request) async => reply(request);
+  FakeMcpTransport Function(McpServerSettings server) build = (_) =>
+      FakeMcpTransport()..responder = (request) async => reply(request);
 
   /// Thrown by the factory when set, to rehearse an unreachable endpoint.
   Object? failure;
@@ -114,11 +114,12 @@ void main() {
 
   final DateTime stamp = DateTime.utc(2026, 4, 5, 6, 7, 8);
 
-  McpComposition composition({McpTransportFactory? withFactory}) => McpComposition(
-    servers: data.mcpServers,
-    policy: policy,
-    transportFactory: withFactory ?? factory,
-  );
+  McpComposition composition({McpTransportFactory? withFactory}) =>
+      McpComposition(
+        servers: data.mcpServers,
+        policy: policy,
+        transportFactory: withFactory ?? factory,
+      );
 
   /// What the user typed in the Safety Center and the store kept.
   const List<String> defaultTools = <String>[
@@ -152,9 +153,7 @@ void main() {
   setUp(() {
     root = Directory.systemTemp.createTempSync('noir_mcp_composition_');
     secretRoot = Directory.systemTemp.createTempSync('noir_mcp_tokens_');
-    data = NoirDataLayer.inMemory(
-      clock: () => stamp,
-    );
+    data = NoirDataLayer.inMemory(clock: () => stamp);
     factory = RecordingTransportFactory();
     policy = SpyPolicyEngine();
   });
@@ -194,81 +193,97 @@ void main() {
         'focus_input',
       ]);
       // The connection was made from the record, with no other host in sight.
-      expect(factory.requested.single.endpoint, 'https://mcp.example.test/notes');
+      expect(
+        factory.requested.single.endpoint,
+        'https://mcp.example.test/notes',
+      );
       expect(factory.requested.single.transportKind, 'http');
       expect(factory.single.kind, 'fake');
     });
 
-    test('building a binding sends no frame until the tool list is asked for',
-        () async {
-      await saveNotesServer();
-      final McpComposition mcp = composition();
+    test(
+      'building a binding sends no frame until the tool list is asked for',
+      () async {
+        await saveNotesServer();
+        final McpComposition mcp = composition();
 
-      await mcp.binding('notes');
-      expect(factory.single.sentFrames, isEmpty);
+        await mcp.binding('notes');
+        expect(factory.single.sentFrames, isEmpty);
 
-      final List<MCPToolDef> tools = await (await mcp.binding('notes'))!
-          .refreshTools();
+        final List<MCPToolDef> tools = await (await mcp.binding(
+          'notes',
+        ))!.refreshTools();
 
-      expect(tools.map((t) => t.name), <String>[
-        'read_note',
-        'delete_note',
-        'focus_input',
-        'post_to_slack',
-      ]);
-      expect(
-        factory.single.requests.map((r) => r['method']),
-        <String>[kMcpMethodInitialize, kMcpMethodToolsList],
-      );
-    });
+        expect(tools.map((t) => t.name), <String>[
+          'read_note',
+          'delete_note',
+          'focus_input',
+          'post_to_slack',
+        ]);
+        expect(factory.single.requests.map((r) => r['method']), <String>[
+          kMcpMethodInitialize,
+          kMcpMethodToolsList,
+        ]);
+      },
+    );
 
-    test('a bearer token reaches the transport as a header, never as a record',
-        () async {
-      await saveNotesServer(token: mcpToken);
-      final McpComposition mcp = composition();
+    test(
+      'a bearer token reaches the transport as a header, never as a record',
+      () async {
+        await saveNotesServer(token: mcpToken);
+        final McpComposition mcp = composition();
 
-      await mcp.binding('notes');
+        await mcp.binding('notes');
 
-      expect(factory.headers.single, <String, String>{
-        kMcpAuthorizationHeader: 'Bearer $mcpToken',
-      });
-      final String record = (await data.mcpServers.find('notes'))!.toJson()
-          .toString();
-      expect(record, isNot(contains(mcpToken)));
-      expect((await data.mcpServers.find('notes'))!.secretValue, isNull);
-    });
+        expect(factory.headers.single, <String, String>{
+          kMcpAuthorizationHeader: 'Bearer $mcpToken',
+        });
+        final String record = (await data.mcpServers.find(
+          'notes',
+        ))!.toJson().toString();
+        expect(record, isNot(contains(mcpToken)));
+        expect((await data.mcpServers.find('notes'))!.secretValue, isNull);
+      },
+    );
 
-    test('a server with no token is connected with no credentials at all',
-        () async {
-      await saveNotesServer();
-      final McpComposition mcp = composition();
+    test(
+      'a server with no token is connected with no credentials at all',
+      () async {
+        await saveNotesServer();
+        final McpComposition mcp = composition();
 
-      await mcp.binding('notes');
+        await mcp.binding('notes');
 
-      expect(factory.headers.single, isEmpty);
-    });
+        expect(factory.headers.single, isEmpty);
+      },
+    );
 
-    test('an edited record rebuilds the adapter instead of reusing it',
-        () async {
-      await saveNotesServer();
-      final McpComposition mcp = composition();
-      final McpServerBinding first = (await mcp.binding('notes'))!;
+    test(
+      'an edited record rebuilds the adapter instead of reusing it',
+      () async {
+        await saveNotesServer();
+        final McpComposition mcp = composition();
+        final McpServerBinding first = (await mcp.binding('notes'))!;
 
-      await data.mcpServers.update('notes', (current) => current.copyWith(
-        allowedTools: const <String>['read_note'],
-        updatedAt: stamp.add(const Duration(minutes: 1)),
-      ));
-      final McpServerBinding second = (await mcp.binding('notes'))!;
+        await data.mcpServers.update(
+          'notes',
+          (current) => current.copyWith(
+            allowedTools: const <String>['read_note'],
+            updatedAt: stamp.add(const Duration(minutes: 1)),
+          ),
+        );
+        final McpServerBinding second = (await mcp.binding('notes'))!;
 
-      expect(identical(first, second), isFalse);
-      expect(first.isAllowed('delete_note'), isTrue);
-      expect(second.isAllowed('delete_note'), isFalse);
-      expect(
-        factory.transports.first.isClosed,
-        isTrue,
-        reason: 'the session the old adapter owned is closed',
-      );
-    });
+        expect(identical(first, second), isFalse);
+        expect(first.isAllowed('delete_note'), isTrue);
+        expect(second.isAllowed('delete_note'), isFalse);
+        expect(
+          factory.transports.first.isClosed,
+          isTrue,
+          reason: 'the session the old adapter owned is closed',
+        );
+      },
+    );
   });
 
   group('an unconfigured server is refused in plain language', () {
@@ -321,77 +336,80 @@ void main() {
   });
 
   group('the policy gate holds through the composition', () {
-    test('a HIGH_RISK tool is refused without a verdict, with nothing sent',
-        () async {
-      await saveNotesServer();
-      final McpComposition mcp = composition();
-      final McpServerBinding binding = (await mcp.binding('notes'))!;
-      await binding.refreshTools();
-      final int frames = factory.single.sentFrames.length;
-
-      final McpToolOutcome outcome = await mcp.callTool(
-        'notes',
-        'delete_note',
-        <String, dynamic>{'id': 3},
-      );
-
-      final McpToolRefused refusal = outcome as McpToolRefused;
-      expect(refusal.code, kMcpConfirmationRequired);
-      expect(refusal.safety!.tier, RiskTier.HIGH_RISK);
-      expect(refusal.safety!.destructive, isTrue);
-      expect(refusal.needsBiometric, isTrue);
-      expect(refusal.reason, contains('needs confirmation'));
-      expect(policy.proposals, hasLength(1));
-      expect(factory.single.sentFrames, hasLength(frames));
-    });
-
-    test('a user confirmation is not a biometric, so a HIGH_RISK call stays shut',
-        () async {
-      await saveNotesServer();
-      final McpComposition mcp = composition();
-      await (await mcp.binding('notes'))!.refreshTools();
-      final int frames = factory.single.sentFrames.length;
-
-      final McpToolOutcome outcome = await mcp.callTool(
-        'notes',
-        'delete_note',
-        <String, dynamic>{'id': 3},
-        confirmation: const McpConfirmation.user(),
-      );
-
-      final McpToolRefused refusal = outcome as McpToolRefused;
-      expect(refusal.code, kMcpBiometricRequired);
-      expect(refusal.needsBiometric, isTrue);
-      expect(refusal.reason, contains('no biometric binding'));
-      expect(factory.single.sentFrames, hasLength(frames));
-    });
-
     test(
-      'a HIGH_RISK call runs only after a real verdict, confirmation and '
-      'biometric',
+      'a HIGH_RISK tool is refused without a verdict, with nothing sent',
       () async {
         await saveNotesServer();
         final McpComposition mcp = composition();
-        await (await mcp.binding('notes'))!.refreshTools();
+        final McpServerBinding binding = (await mcp.binding('notes'))!;
+        await binding.refreshTools();
+        final int frames = factory.single.sentFrames.length;
 
         final McpToolOutcome outcome = await mcp.callTool(
           'notes',
           'delete_note',
           <String, dynamic>{'id': 3},
-          confirmation: const McpConfirmation(
-            userConfirmed: true,
-            biometricSatisfied: true,
-          ),
         );
 
-        expect(outcome, isA<McpToolCompleted>());
-        final completed = outcome as McpToolCompleted;
-        expect(completed.result.toolName, 'delete_note');
-        expect(completed.result.serverId, 'https://mcp.example.test/notes');
-        expect(factory.single.requestFor(kMcpMethodToolsCall)['params'],
-            containsPair('name', 'delete_note'));
+        final McpToolRefused refusal = outcome as McpToolRefused;
+        expect(refusal.code, kMcpConfirmationRequired);
+        expect(refusal.safety!.tier, RiskTier.HIGH_RISK);
+        expect(refusal.safety!.destructive, isTrue);
+        expect(refusal.needsBiometric, isTrue);
+        expect(refusal.reason, contains('needs confirmation'));
+        expect(policy.proposals, hasLength(1));
+        expect(factory.single.sentFrames, hasLength(frames));
       },
     );
+
+    test(
+      'a user confirmation is not a biometric, so a HIGH_RISK call stays shut',
+      () async {
+        await saveNotesServer();
+        final McpComposition mcp = composition();
+        await (await mcp.binding('notes'))!.refreshTools();
+        final int frames = factory.single.sentFrames.length;
+
+        final McpToolOutcome outcome = await mcp.callTool(
+          'notes',
+          'delete_note',
+          <String, dynamic>{'id': 3},
+          confirmation: const McpConfirmation.user(),
+        );
+
+        final McpToolRefused refusal = outcome as McpToolRefused;
+        expect(refusal.code, kMcpBiometricRequired);
+        expect(refusal.needsBiometric, isTrue);
+        expect(refusal.reason, contains('no biometric binding'));
+        expect(factory.single.sentFrames, hasLength(frames));
+      },
+    );
+
+    test('a HIGH_RISK call runs only after a real verdict, confirmation and '
+        'biometric', () async {
+      await saveNotesServer();
+      final McpComposition mcp = composition();
+      await (await mcp.binding('notes'))!.refreshTools();
+
+      final McpToolOutcome outcome = await mcp.callTool(
+        'notes',
+        'delete_note',
+        <String, dynamic>{'id': 3},
+        confirmation: const McpConfirmation(
+          userConfirmed: true,
+          biometricSatisfied: true,
+        ),
+      );
+
+      expect(outcome, isA<McpToolCompleted>());
+      final completed = outcome as McpToolCompleted;
+      expect(completed.result.toolName, 'delete_note');
+      expect(completed.result.serverId, 'https://mcp.example.test/notes');
+      expect(
+        factory.single.requestFor(kMcpMethodToolsCall)['params'],
+        containsPair('name', 'delete_note'),
+      );
+    });
 
     test('a STANDARD tool runs on a user confirmation alone', () async {
       await saveNotesServer();
@@ -409,7 +427,11 @@ void main() {
       );
 
       expect(outcome, isA<McpToolCompleted>());
-      expect(policy.requireBiometric, isFalse, reason: 'risk 1 needs no biometric');
+      expect(
+        policy.requireBiometric,
+        isFalse,
+        reason: 'risk 1 needs no biometric',
+      );
     });
 
     test('a blacklisted action is blocked by the policy engine', () async {
@@ -431,8 +453,10 @@ void main() {
       final McpToolRefused refusal = outcome as McpToolRefused;
       expect(refusal.code, kMcpPolicyBlocked);
       expect(refusal.reason, contains('BLACKLIST'));
-      expect(factory.single.requests.map((r) => r['method']),
-          isNot(contains(kMcpMethodToolsCall)));
+      expect(
+        factory.single.requests.map((r) => r['method']),
+        isNot(contains(kMcpMethodToolsCall)),
+      );
     });
 
     test('the UI lock blocks a gated call even with a confirmation', () async {
@@ -497,50 +521,57 @@ void main() {
       expect((outcome as McpToolRefused).code, kMcpBiometricRequired);
     });
 
-    test('a background-safe read needs no gate and the engine is not asked',
-        () async {
-      await saveNotesServer();
-      // If the composition consulted the engine for a read, this blacklist entry
-      // would block it. It must not be consulted at all.
-      policy.blacklist.add(mcpPolicyAction('notes', 'read_note'));
-      final McpComposition mcp = composition();
-      await (await mcp.binding('notes'))!.refreshTools();
-      final McpServerBinding binding = (await mcp.binding('notes'))!;
-      expect(binding.safetyFor('read_note').allowsBackgroundExecution, isTrue);
+    test(
+      'a background-safe read needs no gate and the engine is not asked',
+      () async {
+        await saveNotesServer();
+        // If the composition consulted the engine for a read, this blacklist entry
+        // would block it. It must not be consulted at all.
+        policy.blacklist.add(mcpPolicyAction('notes', 'read_note'));
+        final McpComposition mcp = composition();
+        await (await mcp.binding('notes'))!.refreshTools();
+        final McpServerBinding binding = (await mcp.binding('notes'))!;
+        expect(
+          binding.safetyFor('read_note').allowsBackgroundExecution,
+          isTrue,
+        );
 
-      final McpToolOutcome outcome = await mcp.callTool(
-        'notes',
-        'read_note',
-        <String, dynamic>{'id': 7},
-      );
+        final McpToolOutcome outcome = await mcp.callTool(
+          'notes',
+          'read_note',
+          <String, dynamic>{'id': 7},
+        );
 
-      expect(outcome, isA<McpToolCompleted>());
-      expect(policy.proposals, isEmpty);
-    });
+        expect(outcome, isA<McpToolCompleted>());
+        expect(policy.proposals, isEmpty);
+      },
+    );
 
-    test('a tool the server never described fails closed at HIGH_RISK',
-        () async {
-      await saveNotesServer(
-        allowedTools: const <String>['mystery', 'read_note'],
-        backgroundSafeTools: const <String>[],
-      );
-      final McpComposition mcp = composition();
+    test(
+      'a tool the server never described fails closed at HIGH_RISK',
+      () async {
+        await saveNotesServer(
+          allowedTools: const <String>['mystery', 'read_note'],
+          backgroundSafeTools: const <String>[],
+        );
+        final McpComposition mcp = composition();
 
-      // No catalogue read: the classification comes from the allowlist alone.
-      final McpServerBinding binding = (await mcp.binding('notes'))!;
-      expect(binding.safetyFor('mystery').tier, RiskTier.HIGH_RISK);
-      expect(binding.safetyFor('mystery').basis, 'unknown-fail-closed');
+        // No catalogue read: the classification comes from the allowlist alone.
+        final McpServerBinding binding = (await mcp.binding('notes'))!;
+        expect(binding.safetyFor('mystery').tier, RiskTier.HIGH_RISK);
+        expect(binding.safetyFor('mystery').basis, 'unknown-fail-closed');
 
-      final McpToolOutcome outcome = await mcp.callTool(
-        'notes',
-        'mystery',
-        <String, dynamic>{},
-      );
+        final McpToolOutcome outcome = await mcp.callTool(
+          'notes',
+          'mystery',
+          <String, dynamic>{},
+        );
 
-      final McpToolRefused refusal = outcome as McpToolRefused;
-      expect(refusal.code, kMcpConfirmationRequired);
-      expect(refusal.safety!.tier, RiskTier.HIGH_RISK);
-    });
+        final McpToolRefused refusal = outcome as McpToolRefused;
+        expect(refusal.code, kMcpConfirmationRequired);
+        expect(refusal.safety!.tier, RiskTier.HIGH_RISK);
+      },
+    );
   });
 
   group('what a server sends stays untrusted data', () {
@@ -562,23 +593,28 @@ void main() {
       expect(result.disposition, 'untrusted-data');
       expect(result.toAgentPayload()['mustNotBeObeyed'], isTrue);
       expect(result.toAgentPayload()['zone'], 'UNTRUSTED_TOOL_RESULT');
-      expect(result.renderForAgent(), startsWith('[[UNTRUSTED MCP TOOL RESULT'));
+      expect(
+        result.renderForAgent(),
+        startsWith('[[UNTRUSTED MCP TOOL RESULT'),
+      );
       // The injected directive survives as data and is neutralized as a
       // directive; it is not silently dropped and it is not an instruction.
       expect(result.combinedText, contains('[neutralized-directive]'));
-      expect(result.combinedText, isNot(contains('ignore previous instructions')));
+      expect(
+        result.combinedText,
+        isNot(contains('ignore previous instructions')),
+      );
     });
 
     test('a server-side error is a typed failure, not a crash', () async {
       await saveNotesServer();
-      factory.build = (McpServerSettings _) =>
-          FakeMcpTransport()
-            ..responder = (request) async {
-              if (request['method'] == kMcpMethodToolsCall) {
-                return rpcError(request['id'], -32602, 'Unknown tool: read_note');
-              }
-              return reply(request);
-            };
+      factory.build = (McpServerSettings _) => FakeMcpTransport()
+        ..responder = (request) async {
+          if (request['method'] == kMcpMethodToolsCall) {
+            return rpcError(request['id'], -32602, 'Unknown tool: read_note');
+          }
+          return reply(request);
+        };
       final McpComposition mcp = composition();
 
       final McpToolOutcome outcome = await mcp.callTool(
@@ -621,12 +657,19 @@ void main() {
       await mcp.forget('notes');
 
       expect(factory.single.isClosed, isTrue);
-      expect(await mcp.binding('notes'), isNotNull, reason: 'the record is still there');
+      expect(
+        await mcp.binding('notes'),
+        isNotNull,
+        reason: 'the record is still there',
+      );
     });
 
     test('closeAll closes every open connection', () async {
       await saveNotesServer();
-      await saveNotesServer(id: 'notes-2', endpoint: 'https://mcp.example.test/two');
+      await saveNotesServer(
+        id: 'notes-2',
+        endpoint: 'https://mcp.example.test/two',
+      );
       final McpComposition mcp = composition();
       await (await mcp.binding('notes'))!.refreshTools();
       await (await mcp.binding('notes-2'))!.refreshTools();

@@ -1,12 +1,30 @@
+// lib/main.dart — the composition root.
+//
+// Nothing here fabricates state. The app builds the real objects it has
+// (a ConversationController, a UsageTracker) and injects them into the screen
+// that renders them; every screen that has no real source wired to it says so on
+// screen instead of showing a plausible-looking placeholder.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'core/conversation_controller.dart';
+import 'providers/usage_tracker.dart';
 import 'ui/command_centre_screen.dart';
 
-void main() => runApp(const NoirApp());
+void main() => runApp(
+  NoirApp(controller: ConversationController(), usage: UsageTracker()),
+);
 
 class NoirApp extends StatelessWidget {
-  const NoirApp({super.key});
+  const NoirApp({super.key, this.controller, this.usage});
+
+  /// The conversation the Command Centre renders. The app owns its lifetime.
+  final ConversationController? controller;
+
+  /// The real usage counters shown in the Command Centre header. Null renders
+  /// "Usage idle" rather than a fabricated figure.
+  final UsageTracker? usage;
 
   @override
   Widget build(BuildContext context) {
@@ -23,13 +41,16 @@ class NoirApp extends StatelessWidget {
           bodyMedium: TextStyle(color: Color(0xFFB0B0B0)),
         ),
       ),
-      home: const SplashScreen(),
+      home: SplashScreen(controller: controller, usage: usage),
     );
   }
 }
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.controller, this.usage});
+
+  final ConversationController? controller;
+  final UsageTracker? usage;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -39,13 +60,20 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    unawaited(Future<void>.delayed(const Duration(milliseconds: 1600), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const CommandCentreScreen()),
-        );
-      }
-    }));
+    unawaited(
+      Future<void>.delayed(const Duration(milliseconds: 1600), () {
+        if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute<void>(
+              builder: (_) => CommandCentreScreen(
+                controller: widget.controller,
+                usage: widget.usage,
+              ),
+            ),
+          );
+        }
+      }),
+    );
   }
 
   @override
@@ -56,11 +84,31 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset('assets/noir_logo.png', width: 200, height: 200, filterQuality: FilterQuality.high),
+            Image.asset(
+              'assets/noir_logo.png',
+              width: 200,
+              height: 200,
+              filterQuality: FilterQuality.high,
+            ),
             const SizedBox(height: 24),
-            const Text('Noir', style: TextStyle(color: Color(0xFFFFFFFF), fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: 4)),
+            const Text(
+              'Noir',
+              style: TextStyle(
+                color: Color(0xFFFFFFFF),
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 4,
+              ),
+            ),
             const SizedBox(height: 8),
-            const Text('On-device automation', style: TextStyle(color: Color(0xFF888888), fontSize: 13, letterSpacing: 1)),
+            const Text(
+              'On-device automation',
+              style: TextStyle(
+                color: Color(0xFF888888),
+                fontSize: 13,
+                letterSpacing: 1,
+              ),
+            ),
           ],
         ),
       ),

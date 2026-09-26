@@ -1,4 +1,4 @@
-// lib/ui/safety_center_screen.dart — D9 (V2.3 §2.5) — polished smooth layout
+// lib/ui/safety_center_screen.dart — D9 (V2.3 §2.5)
 //
 // The two live sections are real, not mock data:
 //
@@ -8,8 +8,15 @@
 //     actually came from the platform via NativeBridge.getSanitizedNodes() /
 //     the screenNodeDumps push stream.
 //
+// A third section, the safety log, is fed by whatever the app injects: the
+// screen renders the [SafetyEvent]s it is handed and admits when it has none.
+// The policy toggle is drawn inert on purpose — a switch that reads "on" while
+// no policy gate is bound to it would be the most expensive lie in this file.
+//
 // Nothing here calls a MethodChannel and nothing here dispatches a gesture:
 // the audit is a read-only consequence of the platform dump.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../platform/accessibility_status.dart';
@@ -17,12 +24,73 @@ import '../platform/native_bridge.dart';
 import '../safety/screen_content_sanitizer.dart' show SanitizedItem;
 import 'accessibility_status_view.dart';
 
+/// What a safety log entry is about.
+enum SafetyEventKind { policy, sanitization, confirmation, dispatch }
+
+/// What the policy engine decided about it.
+enum SafetyEventOutcome { allowed, blocked, awaitingConfirmation, unknown }
+
+/// One real decision the safety pipeline made.
+@immutable
+class SafetyEvent {
+  const SafetyEvent({
+    required this.id,
+    required this.summary,
+    this.kind = SafetyEventKind.policy,
+    this.outcome = SafetyEventOutcome.unknown,
+    this.detail,
+    this.occurredAt,
+  });
+
+  final String id;
+  final String summary;
+  final SafetyEventKind kind;
+  final SafetyEventOutcome outcome;
+
+  /// Whatever else the log had to say about this decision.
+  final String? detail;
+
+  /// When the decision was made. Null means the log did not say.
+  final DateTime? occurredAt;
+
+  /// Wire-stable tag, e.g. `POLICY_BLOCKED`.
+  String get badge =>
+      '${kind.name.toUpperCase()}_${outcome.name.toUpperCase()}';
+}
+
+sealed class SafetyEventState {
+  const SafetyEventState();
+}
+
+final class SafetyEventLoading extends SafetyEventState {
+  const SafetyEventLoading();
+}
+
+final class SafetyEventFailed extends SafetyEventState {
+  const SafetyEventFailed(this.message);
+
+  final String message;
+}
+
+final class SafetyEventAvailable extends SafetyEventState {
+  const SafetyEventAvailable(this.events);
+
+  final List<SafetyEvent> events;
+}
+
 class SafetyCenterScreen extends StatefulWidget {
-  const SafetyCenterScreen({super.key, this.bridge});
+  const SafetyCenterScreen({super.key, this.bridge, this.log, this.onRetryLog});
 
   /// The accessibility bridge. Null uses [NativeBridge.instance]; tests inject
   /// their own so the channel can be mocked.
   final NativeBridge? bridge;
+
+  /// The real safety log. Null means nothing is wired, and the section says so
+  /// instead of listing decisions that were never made.
+  final Stream<SafetyEventState>? log;
+
+  /// Handler for the log's retry control, or null for no control.
+  final VoidCallback? onRetryLog;
 
   @override
   State<SafetyCenterScreen> createState() => _SafetyCenterScreenState();
@@ -32,6 +100,9 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
   late final AccessibilityStatusController _status;
   late final ScreenAuditController _audit;
 
+  StreamSubscription<SafetyEventState>? _logSubscription;
+  SafetyEventState? _logState;
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +110,7 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
     _status = AccessibilityStatusController(bridge: bridge)
       ..addListener(_onChanged);
     _audit = ScreenAuditController(bridge: bridge)..addListener(_onChanged);
+    _bindLog(widget.log);
     // Both loads resolve to their fail-closed state on error, so neither can
     // throw out of initState and leave a blank screen behind.
     _status.refresh();
@@ -46,7 +118,17 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
   }
 
   @override
+  void didUpdateWidget(SafetyCenterScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.log, widget.log)) {
+      return;
+    }
+    _bindLog(widget.log);
+  }
+
+  @override
   void dispose() {
+    _unbindLog();
     _status
       ..removeListener(_onChanged)
       ..dispose();
@@ -54,6 +136,31 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
       ..removeListener(_onChanged)
       ..dispose();
     super.dispose();
+  }
+
+  void _bindLog(Stream<SafetyEventState>? log) {
+    _unbindLog();
+    if (log == null) {
+      return;
+    }
+    _logState = const SafetyEventLoading();
+    _logSubscription = log.listen(
+      (SafetyEventState state) {
+        if (mounted) setState(() => _logState = state);
+      },
+      onError: (Object error) {
+        if (mounted) setState(() => _logState = SafetyEventFailed('$error'));
+      },
+    );
+  }
+
+  void _unbindLog() {
+    final subscription = _logSubscription;
+    _logSubscription = null;
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
+    _logState = null;
   }
 
   void _onChanged() {
@@ -77,7 +184,7 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
             children: [
               Row(
                 children: [
-                  _BackButton(),
+                  const _BackButton(),
                   const SizedBox(width: 12),
                   const Text(
                     'NOIr',
@@ -124,7 +231,7 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Live service status & screen audit',
+                'Live service status, screen audit & policy log',
                 style: TextStyle(
                   color: Color(0xFF888888),
                   fontSize: 13,
@@ -170,6 +277,27 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
               _buildAudit(),
               const SizedBox(height: 28),
               const Text(
+                'Recent safety events',
+                style: TextStyle(
+                  color: Color(0xFFE5E5E5),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Decisions the safety pipeline reported',
+                style: TextStyle(
+                  color: Color(0xFF888888),
+                  fontSize: 12,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildLog(),
+              const SizedBox(height: 28),
+              const Text(
                 'Policy toggles',
                 style: TextStyle(
                   color: Color(0xFFE5E5E5),
@@ -198,20 +326,23 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
     final audit = _audit.audit;
     if (!audit.available) {
       return _AuditNotice(
-        text: 'No screen data: the accessibility service is not connected '
+        text:
+            'No screen data: the accessibility service is not connected '
             '(${audit.code ?? 'UNKNOWN'}).',
       );
     }
     if (audit.stripped.isEmpty) {
       return _AuditNotice(
-        text: 'Last dump read cleanly: ${audit.nodeCount} node(s), '
+        text:
+            'Last dump read cleanly: ${audit.nodeCount} node(s), '
             '${audit.cleanTextNodes.length} text node(s), nothing stripped.',
       );
     }
     return Column(
       children: [
         _AuditNotice(
-          text: 'Last dump: ${audit.nodeCount} node(s) read, '
+          text:
+              'Last dump: ${audit.nodeCount} node(s) read, '
               '${audit.blockedCount} stripped by the A6a sanitizer.',
         ),
         const SizedBox(height: 10),
@@ -222,10 +353,124 @@ class _SafetyCenterScreenState extends State<SafetyCenterScreen> {
       ],
     );
   }
+
+  /// The log is only ever one of four honest states: still reading, no log
+  /// connected, a real failure, or the decisions that were actually reported.
+  Widget _buildLog() {
+    final state = _logState;
+    if (state == null) {
+      return const _AuditNotice(text: 'No safety log is connected.');
+    }
+    if (state is SafetyEventLoading) {
+      return const _AuditNotice(text: 'Reading the safety log…');
+    }
+    if (state is SafetyEventFailed) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AuditNotice(text: state.message),
+          const SizedBox(height: 10),
+          if (widget.onRetryLog != null)
+            _RetryLogButton(onPressed: widget.onRetryLog!),
+        ],
+      );
+    }
+    final events = (state as SafetyEventAvailable).events;
+    if (events.isEmpty) {
+      return const _AuditNotice(text: 'No safety events have been recorded.');
+    }
+    return Column(
+      children: [
+        for (final event in events) ...[
+          _SafetyEventRow(event: event),
+          const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+/// One real decision, drawn from the log entry and nothing else.
+class _SafetyEventRow extends StatelessWidget {
+  const _SafetyEventRow({required this.event});
+
+  final SafetyEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final detail = event.detail;
+    final occurredAt = event.occurredAt;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F0F0F),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF1A1A1A), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E1E),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  event.badge,
+                  style: const TextStyle(
+                    color: Color(0xFF888888),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                occurredAt == null ? 'time unknown' : _clockOf(occurredAt),
+                style: const TextStyle(
+                  color: Color(0xFF5A5A5A),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w300,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            event.summary,
+            style: const TextStyle(
+              color: Color(0xFFE5E5E5),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              height: 1.4,
+            ),
+          ),
+          if (detail != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              detail,
+              style: const TextStyle(
+                color: Color(0xFF888888),
+                fontSize: 11,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 /// Pops when there is somewhere to go back to; inert on a root route.
 class _BackButton extends StatelessWidget {
+  const _BackButton();
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
@@ -278,6 +523,44 @@ class _AuditNotice extends StatelessWidget {
   }
 }
 
+/// Log retry, drawn only when a handler is actually wired to it.
+class _RetryLogButton extends StatelessWidget {
+  const _RetryLogButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      enabled: true,
+      label: 'Retry log',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF2A2A2A)),
+            ),
+            child: const Text(
+              'Retry log',
+              style: TextStyle(
+                color: Color(0xFFB0B0B0),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// One real A6a finding, rendered from the sanitizer's own output.
 class _AuditRow extends StatelessWidget {
   const _AuditRow({required this.item});
@@ -317,10 +600,7 @@ class _AuditRow extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E1E1E),
                   borderRadius: BorderRadius.circular(4),
@@ -363,14 +643,18 @@ class _AuditRow extends StatelessWidget {
   }
 }
 
+/// A setting this screen cannot enforce. It is drawn off and inert, with the
+/// reason on screen, rather than switched on and pretending to be in control of
+/// a policy gate nothing is wired to.
 class _SwitchRow extends StatelessWidget {
-  final String label;
   const _SwitchRow({required this.label});
+
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+    return Container(
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: const Color(0xFF0F0F0F),
@@ -379,18 +663,45 @@ class _SwitchRow extends StatelessWidget {
       ),
       // The tile's own Material has to sit inside the decorated container,
       // otherwise the framework rejects the tile as having invisible ink.
-      child: Material(
-        color: Colors.transparent,
-        child: SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(label, style: TextStyle(color: Color(0xFFFFFFFF), fontSize: 15, fontWeight: FontWeight.w400)),
-          value: true,
-          onChanged: (v) {},
-          activeThumbColor: Color(0xFFFFFFFF),
-          inactiveThumbColor: Color(0xFF2A2A2A),
-          inactiveTrackColor: Color(0xFF1E1E1E),
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFFE5E5E5),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+              value: false,
+              onChanged: null,
+              activeThumbColor: Color(0xFFFFFFFF),
+              inactiveThumbColor: Color(0xFF2A2A2A),
+              inactiveTrackColor: Color(0xFF1E1E1E),
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Not wired to a policy gate yet — this screen cannot enforce it.',
+            style: TextStyle(
+              color: Color(0xFF5A5A5A),
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+/// Local clock reading of a reported moment, to the second.
+String _clockOf(DateTime value) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(value.hour)}:${two(value.minute)}:${two(value.second)}';
 }

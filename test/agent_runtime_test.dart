@@ -62,9 +62,7 @@ class _Recovery extends RecoveryEngine {
     Reflection reflection,
     dynamic executed,
   ) async {
-    return RuntimeResult.blocked(
-      GateResult.blocked('RECOVERY_REQUIRED'),
-    );
+    return RuntimeResult.blocked(GateResult.blocked('RECOVERY_REQUIRED'));
   }
 }
 
@@ -87,22 +85,25 @@ AgentRuntimePipeline _pipeline({
 }
 
 void main() {
-  test('runtime uses the canonical policy gate before approval and execution', () async {
-    final gate = _Gate();
-    final executor = _Executor();
-    final pipeline = _pipeline(
-      policyEngine: PolicyEngine(),
-      gate: gate,
-      executor: executor,
-    );
+  test(
+    'runtime uses the canonical policy gate before approval and execution',
+    () async {
+      final gate = _Gate();
+      final executor = _Executor();
+      final pipeline = _pipeline(
+        policyEngine: PolicyEngine(),
+        gate: gate,
+        executor: executor,
+      );
 
-    final result = await pipeline.run(<String, dynamic>{});
+      final result = await pipeline.run(<String, dynamic>{});
 
-    expect(result.blocked, isFalse);
-    expect(gate.calls, 1);
-    expect(gate.lastPolicy?.message, contains('save_fact'));
-    expect(executor.calls, 1);
-  });
+      expect(result.blocked, isFalse);
+      expect(gate.calls, 1);
+      expect(gate.lastPolicy?.message, contains('save_fact'));
+      expect(executor.calls, 1);
+    },
+  );
 
   test('runtime never executes a policy-blocked proposal', () async {
     final gate = _Gate();

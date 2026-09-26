@@ -90,9 +90,8 @@ abstract class Planner {
   Future<Plan> plan(dynamic context);
 }
 
-typedef ScreenSanitizer = FutureOr<SanitizedResult> Function(
-  List<dynamic> nodes,
-);
+typedef ScreenSanitizer =
+    FutureOr<SanitizedResult> Function(List<dynamic> nodes);
 
 abstract class Gate {
   Future<bool> check(GateResult policy, RiskLevel risk);
@@ -107,17 +106,26 @@ abstract class Executor {
 }
 
 class ReflectionCritic {
-  Future<Reflection> analyze(Plan p, dynamic executed, String sanitizedScreenContent) async => Reflection(confidence: computeConfidence(p, executed, sanitizedScreenContent));
+  Future<Reflection> analyze(
+    Plan p,
+    dynamic executed,
+    String sanitizedScreenContent,
+  ) async => Reflection(
+    confidence: computeConfidence(p, executed, sanitizedScreenContent),
+  );
 
   // A12 — real reflection: compares intended outcome (plan) vs observed screen state (executed result + sanitized content)
   // Produces confidence score 0.0-1.0; low confidence (<0.5) routes to HierarchicalRecovery (A4)
   double computeConfidence(Plan p, dynamic executed, String sanitizedContent) {
     // If executed result indicates failure or mismatch with plan, confidence drops
-    if (executed == null || executed.toString().contains('failed') || executed.toString().contains('error')) {
+    if (executed == null ||
+        executed.toString().contains('failed') ||
+        executed.toString().contains('error')) {
       return 0.3; // Low confidence -> trigger recovery
     }
     // If screen content was heavily sanitized (injection detected), lower confidence slightly
-    if (sanitizedContent.contains('REASON_') || sanitizedContent.contains('stripped')) {
+    if (sanitizedContent.contains('REASON_') ||
+        sanitizedContent.contains('stripped')) {
       return 0.6; // Moderate confidence, still passes but flagged
     }
     // Normal successful execution with clean screen content -> high confidence
@@ -142,9 +150,9 @@ class RuntimeResult {
   RuntimeResult.success(this.result, this.reflection) : blocked = false;
 
   RuntimeResult.blocked(GateResult policy)
-      : blocked = true,
-        result = policy,
-        reflection = null;
+    : blocked = true,
+      result = policy,
+      reflection = null;
 }
 
 class Plan {
@@ -181,7 +189,11 @@ class ReflectionEvent {
   final String skillId;
   final double confidenceScore; // 0.0 - 1.0
   final bool degradedToNeedsReview;
-  ReflectionEvent({required this.skillId, required this.confidenceScore, this.degradedToNeedsReview = false});
+  ReflectionEvent({
+    required this.skillId,
+    required this.confidenceScore,
+    this.degradedToNeedsReview = false,
+  });
   bool isConfident() => confidenceScore >= 0.75;
   bool needsReview() => degradedToNeedsReview || confidenceScore < 0.5;
 }

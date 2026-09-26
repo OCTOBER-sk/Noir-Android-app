@@ -7,9 +7,17 @@ const int OPENROUTER_FREE_DAILY_CAP_UNFUNDED = 50;
 const int OPENROUTER_FREE_DAILY_CAP_FUNDED = 1000;
 
 class CostEstimate {
-  final int rpmHeadroom; final int dailyUsed; final int dailyCap;
-  final List<String> fallbackIds; // 2-3 free model IDs, fetched live (not hardcoded permanently)
-  CostEstimate(this.rpmHeadroom, this.dailyUsed, this.dailyCap, this.fallbackIds);
+  final int rpmHeadroom;
+  final int dailyUsed;
+  final int dailyCap;
+  final List<String>
+  fallbackIds; // 2-3 free model IDs, fetched live (not hardcoded permanently)
+  CostEstimate(
+    this.rpmHeadroom,
+    this.dailyUsed,
+    this.dailyCap,
+    this.fallbackIds,
+  );
 }
 
 // Cache-with-TTL for live free-model list (per A9 revised: fetched from OpenRouter endpoint, not hardcoded)
@@ -40,14 +48,23 @@ class FreeModelCache {
 
 class CostEstimator {
   static CostEstimate estimate({required bool funded, required int usedToday}) {
-    final cap = funded ? OPENROUTER_FREE_DAILY_CAP_FUNDED : OPENROUTER_FREE_DAILY_CAP_UNFUNDED;
+    final cap = funded
+        ? OPENROUTER_FREE_DAILY_CAP_FUNDED
+        : OPENROUTER_FREE_DAILY_CAP_UNFUNDED;
     // Fallback array: 2-3 free model IDs per A9 revised (not a single hardcoded ID)
-    final fallbackIds = ['openrouter/free-model-a', 'openrouter/free-model-b', 'openrouter/free-model-c'];
+    final fallbackIds = [
+      'openrouter/free-model-a',
+      'openrouter/free-model-b',
+      'openrouter/free-model-c',
+    ];
     return CostEstimate(OPENROUTER_FREE_RPM_CAP, usedToday, cap, fallbackIds);
   }
 
   // Support fallback array routing: tries model A, then B, then C on 429 / rotation
-  static Future<String> resolveWithFallback(List<String> fallbackIds, {int attempt = 0}) async {
+  static Future<String> resolveWithFallback(
+    List<String> fallbackIds, {
+    int attempt = 0,
+  }) async {
     if (attempt >= fallbackIds.length) {
       throw Exception('All fallback models exhausted');
     }

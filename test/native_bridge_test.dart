@@ -76,77 +76,87 @@ void main() {
   });
 
   group('NativeBridge.dispatchGesture - gate clear', () {
-    test('calls dispatchGesture and reports execution when the gate clears',
-        () async {
-      install((call) async => <String, dynamic>{
+    test(
+      'calls dispatchGesture and reports execution when the gate clears',
+      () async {
+        install(
+          (call) async => <String, dynamic>{
             'executed': true,
             'gesture': 'tap',
             'x': 140.0,
             'y': 160.0,
             'gateSource': kGateSource,
             'gateMessage': 'Confirmation required: save_fact',
-          });
+          },
+        );
 
-      final outcome = await bridge.dispatchGesture(
-        proposal: _safeProposal,
-        bounds: _target,
-        confirmed: true,
-      );
+        final outcome = await bridge.dispatchGesture(
+          proposal: _safeProposal,
+          bounds: _target,
+          confirmed: true,
+        );
 
-      expect(outcome.executed, isTrue);
-      expect(outcome.verdict.allowed, isTrue);
-      expect(outcome.verdict.riskLevel, 0);
-      expect(outcome.receipt['x'], 140.0);
-      expect(outcome.receipt['gateSource'], kGateSource);
+        expect(outcome.executed, isTrue);
+        expect(outcome.verdict.allowed, isTrue);
+        expect(outcome.verdict.riskLevel, 0);
+        expect(outcome.receipt['x'], 140.0);
+        expect(outcome.receipt['gateSource'], kGateSource);
 
-      expect(received, hasLength(1));
-      expect(received.single.method, kMethodDispatchGesture);
-      final payload = received.single.arguments as Map<Object?, Object?>;
-      expect(payload['proposal'], _safeProposal);
-      expect(payload['bounds'], <String, dynamic>{
-        'left': 40,
-        'top': 120,
-        'right': 240,
-        'bottom': 200,
-      });
-      expect(payload['confirmed'], isTrue);
-      expect(payload['gateRequestId'], isA<String>());
-    });
+        expect(received, hasLength(1));
+        expect(received.single.method, kMethodDispatchGesture);
+        final payload = received.single.arguments as Map<Object?, Object?>;
+        expect(payload['proposal'], _safeProposal);
+        expect(payload['bounds'], <String, dynamic>{
+          'left': 40,
+          'top': 120,
+          'right': 240,
+          'bottom': 200,
+        });
+        expect(payload['confirmed'], isTrue);
+        expect(payload['gateRequestId'], isA<String>());
+      },
+    );
 
-    test('a level-3 action keeps its biometric requirement end to end',
-        () async {
-      install((call) async => <String, dynamic>{
+    test(
+      'a level-3 action keeps its biometric requirement end to end',
+      () async {
+        install(
+          (call) async => <String, dynamic>{
             'executed': true,
             'riskLevel': 3,
             'gateSource': kGateSource,
-          });
+          },
+        );
 
-      final outcome = await bridge.dispatchGesture(
-        proposal: _highRiskProposal,
-        bounds: _target,
-        confirmed: true,
-      );
+        final outcome = await bridge.dispatchGesture(
+          proposal: _highRiskProposal,
+          bounds: _target,
+          confirmed: true,
+        );
 
-      expect(outcome.executed, isTrue);
-      expect(outcome.verdict.needsBiometric, isTrue);
-      expect(outcome.verdict.riskLevel, 3);
-      final payload = received.single.arguments as Map<Object?, Object?>;
-      expect(payload['riskLevel'], 3);
-    });
+        expect(outcome.executed, isTrue);
+        expect(outcome.verdict.needsBiometric, isTrue);
+        expect(outcome.verdict.riskLevel, 3);
+        final payload = received.single.arguments as Map<Object?, Object?>;
+        expect(payload['riskLevel'], 3);
+      },
+    );
 
-    test('a platform reply without executed:true is treated as a block',
-        () async {
-      install((call) async => <String, dynamic>{'gesture': 'tap'});
+    test(
+      'a platform reply without executed:true is treated as a block',
+      () async {
+        install((call) async => <String, dynamic>{'gesture': 'tap'});
 
-      final outcome = await bridge.dispatchGesture(
-        proposal: _safeProposal,
-        bounds: _target,
-        confirmed: true,
-      );
+        final outcome = await bridge.dispatchGesture(
+          proposal: _safeProposal,
+          bounds: _target,
+          confirmed: true,
+        );
 
-      expect(outcome.executed, isFalse);
-      expect(outcome.blockReason, kCodeNativeDispatchFailed);
-    });
+        expect(outcome.executed, isFalse);
+        expect(outcome.blockReason, kCodeNativeDispatchFailed);
+      },
+    );
   });
 
   group('NativeBridge.dispatchGesture - gate block', () {
@@ -185,19 +195,21 @@ void main() {
       expect(received, isEmpty);
     });
 
-    test('an unconfirmed action is blocked before the platform is called',
-        () async {
-      installUnreachable();
+    test(
+      'an unconfirmed action is blocked before the platform is called',
+      () async {
+        installUnreachable();
 
-      final outcome = await bridge.dispatchGesture(
-        proposal: _safeProposal,
-        bounds: _target,
-      );
+        final outcome = await bridge.dispatchGesture(
+          proposal: _safeProposal,
+          bounds: _target,
+        );
 
-      expect(outcome.executed, isFalse);
-      expect(outcome.blockReason, kCodeConfirmationRequired);
-      expect(received, isEmpty);
-    });
+        expect(outcome.executed, isFalse);
+        expect(outcome.blockReason, kCodeConfirmationRequired);
+        expect(received, isEmpty);
+      },
+    );
 
     test('an off-screen or degenerate target is blocked', () async {
       installUnreachable();
@@ -210,7 +222,11 @@ void main() {
       final offScreen = await bridge.dispatchGesture(
         proposal: _safeProposal,
         bounds: const GestureBounds(
-            left: -400, top: -400, right: -200, bottom: -200),
+          left: -400,
+          top: -400,
+          right: -200,
+          bottom: -200,
+        ),
         confirmed: true,
       );
 
@@ -222,10 +238,12 @@ void main() {
     });
 
     test('a POLICY_BLOCKED platform error surfaces as a block', () async {
-      install((call) async => throw PlatformException(
-            code: 'POLICY_BLOCKED',
-            message: 'PolicyEngine blocked: UI_LOCK',
-          ));
+      install(
+        (call) async => throw PlatformException(
+          code: 'POLICY_BLOCKED',
+          message: 'PolicyEngine blocked: UI_LOCK',
+        ),
+      );
 
       final outcome = await bridge.dispatchGesture(
         proposal: _safeProposal,
@@ -254,10 +272,12 @@ void main() {
     });
 
     test('an unreachable Dart gate is reported as fail-closed', () async {
-      install((call) async => throw PlatformException(
-            code: 'POLICY_GATE_UNREACHABLE',
-            message: 'Dart PolicyEngine did not answer within 3000ms',
-          ));
+      install(
+        (call) async => throw PlatformException(
+          code: 'POLICY_GATE_UNREACHABLE',
+          message: 'Dart PolicyEngine did not answer within 3000ms',
+        ),
+      );
 
       final outcome = await bridge.dispatchGesture(
         proposal: _safeProposal,
@@ -279,18 +299,22 @@ void main() {
       expect(dump.isEmpty, isTrue);
     });
 
-    test('getNodes surfaces a service error rather than empty content',
-        () async {
-      install((call) async => throw PlatformException(
+    test(
+      'getNodes surfaces a service error rather than empty content',
+      () async {
+        install(
+          (call) async => throw PlatformException(
             code: 'SERVICE_UNAVAILABLE',
             message: 'enable the accessibility service',
-          ));
+          ),
+        );
 
-      final dump = await bridge.getNodes();
+        final dump = await bridge.getNodes();
 
-      expect(dump.available, isFalse);
-      expect(dump.code, 'SERVICE_UNAVAILABLE');
-    });
+        expect(dump.available, isFalse);
+        expect(dump.code, 'SERVICE_UNAVAILABLE');
+      },
+    );
 
     test('serviceStatus degrades to disconnected, never throws', () async {
       install((call) async => throw MissingPluginException());
@@ -301,15 +325,17 @@ void main() {
     });
 
     test('serviceStatus reports a connected service verbatim', () async {
-      install((call) async => <String, dynamic>{
-            'serviceConnected': true,
-            'canPerformGestures': true,
-            'canRetrieveWindowContent': true,
-            'hasNodeDump': true,
-            'lastNodeCount': 42,
-            'runtimeSinkInstalled': true,
-            'gateSource': kGateSource,
-          });
+      install(
+        (call) async => <String, dynamic>{
+          'serviceConnected': true,
+          'canPerformGestures': true,
+          'canRetrieveWindowContent': true,
+          'hasNodeDump': true,
+          'lastNodeCount': 42,
+          'runtimeSinkInstalled': true,
+          'gateSource': kGateSource,
+        },
+      );
 
       final status = await bridge.serviceStatus();
 
@@ -324,16 +350,15 @@ void main() {
     test('a pushed dump reaches the screenNodeDumps stream', () async {
       final received = bridge.screenNodeDumps.first;
 
-      final acknowledged = await bridge.handlePlatformMethod(MethodCall(
-        kMethodScreenNodes,
-        <String, dynamic>{
+      final acknowledged = await bridge.handlePlatformMethod(
+        MethodCall(kMethodScreenNodes, <String, dynamic>{
           'nodes': <Object?>[
             <String, dynamic>{'text': 'hello', 'alpha': 1.0},
           ],
           'nodeCount': 1,
           'source': 'AgentAccessibilityService',
-        },
-      ));
+        }),
+      );
 
       expect(acknowledged, 1);
       final nodes = await received;
@@ -341,8 +366,7 @@ void main() {
       expect(nodes.single['text'], 'hello');
     });
 
-    test('a malformed push is rejected without polluting the stream',
-        () async {
+    test('a malformed push is rejected without polluting the stream', () async {
       for (final arguments in <Object?>[
         null,
         'nodes',
@@ -357,10 +381,12 @@ void main() {
   });
 
   group('NativeBridge.getNodes', () {
-    test('parses the platform envelope and sanitizes through the A6a sanitizer',
-        () async {
-      // Exactly the envelope AgentAccessibilityService.payloadOf produces.
-      install((call) async => <String, dynamic>{
+    test(
+      'parses the platform envelope and sanitizes through the A6a sanitizer',
+      () async {
+        // Exactly the envelope AgentAccessibilityService.payloadOf produces.
+        install(
+          (call) async => <String, dynamic>{
             'nodes': <Object?>[
               <String, dynamic>{
                 'text': 'Invisible instructions',
@@ -390,28 +416,32 @@ void main() {
             'nodeCount': 2,
             'capturedAtMs': 1234,
             'source': 'AgentAccessibilityService',
-          });
+          },
+        );
 
-      final dump = await bridge.getNodes();
+        final dump = await bridge.getNodes();
 
-      expect(dump.available, isTrue);
-      expect(dump.nodes, hasLength(2));
+        expect(dump.available, isTrue);
+        expect(dump.nodes, hasLength(2));
 
-      final sanitized = dump.sanitized();
-      expect(sanitized.cleanTextNodes, <String>['Compose message']);
-      expect(sanitized.stripped, hasLength(1));
-      expect(sanitized.stripped.single.text, 'Invisible instructions');
-    });
+        final sanitized = dump.sanitized();
+        expect(sanitized.cleanTextNodes, <String>['Compose message']);
+        expect(sanitized.stripped, hasLength(1));
+        expect(sanitized.stripped.single.text, 'Invisible instructions');
+      },
+    );
 
-    test('a reply that is not the documented envelope is unavailable',
-        () async {
-      install((call) async => <String, dynamic>{'unexpected': true});
+    test(
+      'a reply that is not the documented envelope is unavailable',
+      () async {
+        install((call) async => <String, dynamic>{'unexpected': true});
 
-      final dump = await bridge.getNodes();
+        final dump = await bridge.getNodes();
 
-      expect(dump.available, isFalse);
-      expect(dump.code, kCodeNodeDumpUnavailable);
-    });
+        expect(dump.available, isFalse);
+        expect(dump.code, kCodeNodeDumpUnavailable);
+      },
+    );
   });
 
   group('NativeBridge re-entrant policyGate', () {
@@ -422,32 +452,36 @@ void main() {
       return reply! as Map<Object?, Object?>;
     }
 
-    test('a confirmed, allowed proposal is authorised by PolicyEngine',
-        () async {
-      final reply = await askGate(<String, dynamic>{
-        'proposal': _safeProposal,
-        'confirmed': true,
-        'gateRequestId': 'gate-1',
-      });
+    test(
+      'a confirmed, allowed proposal is authorised by PolicyEngine',
+      () async {
+        final reply = await askGate(<String, dynamic>{
+          'proposal': _safeProposal,
+          'confirmed': true,
+          'gateRequestId': 'gate-1',
+        });
 
-      expect(reply['allowed'], isTrue);
-      expect(reply['needsBiometric'], isFalse);
-      expect(reply['riskLevel'], 0);
-      expect(reply['source'], kGateSource);
-      expect(reply['message'], contains('save_fact'));
-    });
+        expect(reply['allowed'], isTrue);
+        expect(reply['needsBiometric'], isFalse);
+        expect(reply['riskLevel'], 0);
+        expect(reply['source'], kGateSource);
+        expect(reply['message'], contains('save_fact'));
+      },
+    );
 
-    test('a high-risk proposal is authorised but still demands a biometric',
-        () async {
-      final reply = await askGate(<String, dynamic>{
-        'proposal': _highRiskProposal,
-        'confirmed': true,
-      });
+    test(
+      'a high-risk proposal is authorised but still demands a biometric',
+      () async {
+        final reply = await askGate(<String, dynamic>{
+          'proposal': _highRiskProposal,
+          'confirmed': true,
+        });
 
-      expect(reply['allowed'], isTrue);
-      expect(reply['needsBiometric'], isTrue);
-      expect(reply['riskLevel'], 3);
-    });
+        expect(reply['allowed'], isTrue);
+        expect(reply['needsBiometric'], isTrue);
+        expect(reply['riskLevel'], 3);
+      },
+    );
 
     test('an unconfirmed request is blocked', () async {
       final reply = await askGate(<String, dynamic>{'proposal': _safeProposal});
@@ -471,18 +505,20 @@ void main() {
       }
     });
 
-    test('a platform-supplied riskLevel cannot downgrade the classification',
-        () async {
-      final reply = await askGate(<String, dynamic>{
-        'proposal': _highRiskProposal,
-        'confirmed': true,
-        // A tampered native caller asking for "this is safe".
-        'riskLevel': 0,
-      });
+    test(
+      'a platform-supplied riskLevel cannot downgrade the classification',
+      () async {
+        final reply = await askGate(<String, dynamic>{
+          'proposal': _highRiskProposal,
+          'confirmed': true,
+          // A tampered native caller asking for "this is safe".
+          'riskLevel': 0,
+        });
 
-      expect(reply['riskLevel'], 3);
-      expect(reply['needsBiometric'], isTrue);
-    });
+        expect(reply['riskLevel'], 3);
+        expect(reply['needsBiometric'], isTrue);
+      },
+    );
 
     test('an unknown platform call is not implemented', () async {
       expect(

@@ -24,7 +24,11 @@ class ConversationController {
   ConversationMessage submitUserMessage(String text) {
     _ensureOpen();
     if (text.trim().isEmpty) {
-      throw ArgumentError.value(text, 'text', 'User message must not be blank.');
+      throw ArgumentError.value(
+        text,
+        'text',
+        'User message must not be blank.',
+      );
     }
 
     final message = ConversationMessage(

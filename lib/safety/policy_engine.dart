@@ -55,9 +55,17 @@ class PolicyEngine {
 }
 
 class GateResult {
-  final bool allowed; final String message; final bool needsBiometric; final bool needsConfirmation;
-  GateResult.confirm(this.message, this.needsBiometric) : allowed = true, needsConfirmation = true;
-  GateResult.blocked(this.message) : allowed = false, needsBiometric = false, needsConfirmation = false;
+  final bool allowed;
+  final String message;
+  final bool needsBiometric;
+  final bool needsConfirmation;
+  GateResult.confirm(this.message, this.needsBiometric)
+    : allowed = true,
+      needsConfirmation = true;
+  GateResult.blocked(this.message)
+    : allowed = false,
+      needsBiometric = false,
+      needsConfirmation = false;
 }
 
 // A8 biometric gate: biometric requirement set when riskLevel >= 2 (biometric flag present in PolicyEngine).

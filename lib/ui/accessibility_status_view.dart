@@ -50,7 +50,9 @@ class AccessibilityStatusPill extends StatelessWidget {
                 Icon(
                   ready ? Icons.accessibility_new_rounded : Icons.link_off,
                   size: 14,
-                  color: ready ? const Color(0xFF888888) : const Color(0xFFB0B0B0),
+                  color: ready
+                      ? const Color(0xFF888888)
+                      : const Color(0xFFB0B0B0),
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -118,10 +120,7 @@ class AccessibilityStatusPanel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        _CapabilityRow(
-          label: 'Service connected',
-          value: status.connected,
-        ),
+        _CapabilityRow(label: 'Service connected', value: status.connected),
         _CapabilityRow(
           label: 'May dispatch gestures',
           value: status.canDispatchGesture,
@@ -130,27 +129,18 @@ class AccessibilityStatusPanel extends StatelessWidget {
           label: 'May read screen content',
           value: status.canReadScreen,
         ),
-        _CapabilityRow(
-          label: 'Holds a node dump',
-          value: status.hasNodeDump,
-        ),
+        _CapabilityRow(label: 'Holds a node dump', value: status.hasNodeDump),
         if (status.platformReachable) ...[
           const SizedBox(height: 6),
           Text(
             'Last dump: ${status.lastNodeCount} node(s) · '
             'stream sink ${status.runtimeSinkInstalled ? 'installed' : 'missing'}',
-            style: const TextStyle(
-              color: Color(0xFF888888),
-              fontSize: 11,
-            ),
+            style: const TextStyle(color: Color(0xFF888888), fontSize: 11),
           ),
           if (status.gateSource != null)
             Text(
               'Gate authority: ${status.gateSource}',
-              style: const TextStyle(
-                color: Color(0xFF5A5A5A),
-                fontSize: 10,
-              ),
+              style: const TextStyle(color: Color(0xFF5A5A5A), fontSize: 10),
             ),
         ],
         if (remedy != null) ...[
@@ -191,7 +181,9 @@ class _CapabilityRow extends StatelessWidget {
             child: Text(
               label,
               style: TextStyle(
-                color: value ? NoirColors.textSecondary : const Color(0xFF888888),
+                color: value
+                    ? NoirColors.textSecondary
+                    : const Color(0xFF888888),
                 fontSize: 13,
               ),
             ),

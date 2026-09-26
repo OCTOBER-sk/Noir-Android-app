@@ -68,15 +68,14 @@ class GestureBounds {
 
   /// A gesture point must land inside the display, otherwise the tap is
   /// silently dropped by the framework.
-  bool get hasOnScreenCenter =>
-      centerX >= 0 && centerY >= 0 && !isEmpty;
+  bool get hasOnScreenCenter => centerX >= 0 && centerY >= 0 && !isEmpty;
 
   Map<String, dynamic> toChannelMap() => <String, dynamic>{
-        'left': left,
-        'top': top,
-        'right': right,
-        'bottom': bottom,
-      };
+    'left': left,
+    'top': top,
+    'right': right,
+    'bottom': bottom,
+  };
 
   /// Reads a rectangle out of an AgentAccessibilityService node dump.
   /// `screenBounds` wins because `dispatchGesture` works in screen
@@ -91,12 +90,7 @@ class GestureBounds {
     if (left == null || top == null || right == null || bottom == null) {
       return null;
     }
-    return GestureBounds(
-      left: left,
-      top: top,
-      right: right,
-      bottom: bottom,
-    );
+    return GestureBounds(left: left, top: top, right: right, bottom: bottom);
   }
 }
 
@@ -134,12 +128,12 @@ class NativeGateVerdict {
   }
 
   Map<String, dynamic> toChannelMap() => <String, dynamic>{
-        'allowed': allowed,
-        'message': message,
-        'needsBiometric': needsBiometric,
-        'riskLevel': riskLevel,
-        'source': kGateSource,
-      };
+    'allowed': allowed,
+    'message': message,
+    'needsBiometric': needsBiometric,
+    'riskLevel': riskLevel,
+    'source': kGateSource,
+  };
 
   /// Strict decoder. Anything unexpected is `null` so callers can fail closed
   /// rather than guess.
@@ -218,8 +212,8 @@ class NativeNodeDump {
   });
 
   const NativeNodeDump.unavailable(String this.code)
-      : nodes = const <Map<String, dynamic>>[],
-        available = false;
+    : nodes = const <Map<String, dynamic>>[],
+      available = false;
 
   bool get isEmpty => nodes.isEmpty;
 
@@ -233,9 +227,9 @@ class NativeBridge {
     MethodChannel? channel,
     PolicyEngine? policyEngine,
     RiskClassifier? riskClassifier,
-  })  : _channel = channel ?? const MethodChannel(kNativeChannelName),
-        _policyEngine = policyEngine ?? PolicyEngine(),
-        _riskClassifier = riskClassifier ?? RiskClassifier() {
+  }) : _channel = channel ?? const MethodChannel(kNativeChannelName),
+       _policyEngine = policyEngine ?? PolicyEngine(),
+       _riskClassifier = riskClassifier ?? RiskClassifier() {
     _channel.setMethodCallHandler(handlePlatformMethod);
   }
 
@@ -290,7 +284,10 @@ class NativeBridge {
     }
 
     final RiskLevel risk = await _classify(proposal);
-    final GateResult result = _policyEngine.gate(proposal, riskLevel: risk.level);
+    final GateResult result = _policyEngine.gate(
+      proposal,
+      riskLevel: risk.level,
+    );
 
     if (!result.allowed) {
       return NativeGateVerdict.fromGateResult(result, riskLevel: risk.level);
@@ -317,8 +314,9 @@ class NativeBridge {
   /// source}`); a reply that is not that shape is reported as unavailable.
   Future<NativeNodeDump> getNodes() async {
     try {
-      final reply =
-          await _channel.invokeMapMethod<String, dynamic>(kMethodGetNodes);
+      final reply = await _channel.invokeMapMethod<String, dynamic>(
+        kMethodGetNodes,
+      );
       final raw = reply?['nodes'];
       if (raw is! List) {
         return const NativeNodeDump.unavailable(kCodeNodeDumpUnavailable);
@@ -332,7 +330,9 @@ class NativeBridge {
     } on MissingPluginException {
       return const NativeNodeDump.unavailable(kCodeNativeBridgeUnavailable);
     } on PlatformException catch (error) {
-      return NativeNodeDump.unavailable(_codeOf(error, kCodeNodeDumpUnavailable));
+      return NativeNodeDump.unavailable(
+        _codeOf(error, kCodeNodeDumpUnavailable),
+      );
     }
   }
 
@@ -368,9 +368,14 @@ class NativeBridge {
     bool confirmed = false,
   }) async {
     final RiskLevel risk = await _classify(proposal);
-    final GateResult result = _policyEngine.gate(proposal, riskLevel: risk.level);
-    final NativeGateVerdict verdict =
-        NativeGateVerdict.fromGateResult(result, riskLevel: risk.level);
+    final GateResult result = _policyEngine.gate(
+      proposal,
+      riskLevel: risk.level,
+    );
+    final NativeGateVerdict verdict = NativeGateVerdict.fromGateResult(
+      result,
+      riskLevel: risk.level,
+    );
 
     if (!verdict.allowed) {
       return NativeGestureOutcome.blocked(verdict);

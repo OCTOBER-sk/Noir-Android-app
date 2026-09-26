@@ -1,6 +1,7 @@
 // The whole data layer against real files: open it, use it, close the process,
 // open it again, and check that everything came back — conversations, settings,
-// prompts, memories, usage and jobs — with no secret in the exported snapshot.
+// prompts, memories, usage, jobs and the configured MCP servers — with no
+// secret in the exported snapshot.
 import 'dart:convert';
 import 'dart:io';
 
@@ -9,6 +10,7 @@ import 'package:noir_android_app/core/conversation_models.dart';
 import 'package:noir_android_app/data/data.dart';
 
 const String secretValue = 'sk-or-v1-INTEGRATION-SECRET-9999';
+const String mcpToken = 'mcp-bearer-INTEGRATION-TOKEN-4242';
 
 void main() {
   late Directory root;
@@ -185,11 +187,27 @@ void main() {
         schedule: JobSchedule.interval(intervalMinutes: 30),
       ),
     );
+    // A configured MCP server, credentialed: the whole-app export claims to hold
+    // every record in every collection, so a backup that dropped the MCP
+    // configuration would restore an app with no MCP capability at all and no
+    // record of which servers were configured. The token is what proves the
+    // collection belongs in the export without leaking through it.
+    await layer.mcpServers.upsert(
+      layer.mcpServers.newServer(
+        id: 'notes',
+        displayName: 'Notes',
+        endpoint: 'https://mcp.example.test/notes',
+        allowedTools: const <String>['read_note'],
+        backgroundSafeTools: const <String>['read_note'],
+      ),
+    );
+    await layer.mcpServers.setToken('notes', mcpToken);
 
     final export = await layer.exportRedactedSnapshot();
     final text = jsonEncode(export);
 
     expect(text, isNot(contains(secretValue)));
+    expect(text, isNot(contains(mcpToken)));
     expect(jsonDecode(text), isA<Map<String, Object?>>());
     expect(export['exportVersion'], 1);
     expect(export['collections'], isA<Map<String, Object?>>());
@@ -200,6 +218,7 @@ void main() {
       NoirCollections.prompts,
       NoirCollections.memories,
       NoirCollections.jobs,
+      NoirCollections.mcpServers,
       NoirCollections.usage,
     });
     final providers =
@@ -208,8 +227,22 @@ void main() {
         (providers['items']! as List<Object?>).single! as Map<String, Object?>;
     expect(provider['secretConfigured'], isTrue);
     expect(provider['secretRef'], redactedSecretPlaceholder);
+    // The server's endpoint and allowlist are the configuration a restore needs;
+    // the bearer token is not, and is not there.
+    final servers =
+        collections[NoirCollections.mcpServers]! as Map<String, Object?>;
+    final server =
+        (servers['items']! as List<Object?>).single! as Map<String, Object?>;
+    expect(server['endpoint'], 'https://mcp.example.test/notes');
+    expect(server['allowedTools'], <String>['read_note']);
+    expect(server['secretConfigured'], isTrue);
+    expect(server['secretRef'], redactedSecretPlaceholder);
     expect(
       await layer.settings.recordsLeakingSecrets(<String>[secretValue]),
+      isEmpty,
+    );
+    expect(
+      await layer.mcpServers.recordsLeakingTokens(<String>[mcpToken]),
       isEmpty,
     );
   });

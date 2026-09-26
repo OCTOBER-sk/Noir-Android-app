@@ -21,7 +21,8 @@ Map<String, dynamic> node({
     'alpha': alpha,
     'visible': visible,
     'zOrder': zOrder,
-    'bounds': bounds ??
+    'bounds':
+        bounds ??
         <String, dynamic>{'left': 0, 'top': 0, 'right': 50, 'bottom': 20},
   };
 }
@@ -136,40 +137,46 @@ void main() {
       expect(blacklisted.needsConfirmation, isFalse);
     });
 
-    test('PolicyEngine gate returns a meaningful confirmation for a valid proposal', () {
-      final engine = PolicyEngine();
-      final proposal = <String, dynamic>{
-        'action': 'save_fact',
-        'input': 'remember this',
-      };
+    test(
+      'PolicyEngine gate returns a meaningful confirmation for a valid proposal',
+      () {
+        final engine = PolicyEngine();
+        final proposal = <String, dynamic>{
+          'action': 'save_fact',
+          'input': 'remember this',
+        };
 
-      expect(() => engine.gate(proposal), returnsNormally);
-      final result = engine.gate(proposal);
-
-      expect(result.allowed, isTrue);
-      expect(result.message, isA<String>());
-      expect(result.message, contains('save_fact'));
-      expect(result.needsConfirmation, isTrue);
-      expect(result.needsBiometric, isFalse);
-    });
-
-    test('PolicyEngine gate requires biometric confirmation for risk level 2+', () {
-      final engine = PolicyEngine();
-
-      for (final riskLevel in [2, 3]) {
-        final result = engine.gate(
-          <String, dynamic>{'action': 'send', 'input': 'person@example.com'},
-          riskLevel: riskLevel,
-        );
+        expect(() => engine.gate(proposal), returnsNormally);
+        final result = engine.gate(proposal);
 
         expect(result.allowed, isTrue);
         expect(result.message, isA<String>());
-        expect(result.message, contains('send'));
+        expect(result.message, contains('save_fact'));
         expect(result.needsConfirmation, isTrue);
-        expect(result.needsBiometric, isTrue);
-      }
+        expect(result.needsBiometric, isFalse);
+      },
+    );
 
-      expect(engine.requireBiometric, isTrue);
-    });
+    test(
+      'PolicyEngine gate requires biometric confirmation for risk level 2+',
+      () {
+        final engine = PolicyEngine();
+
+        for (final riskLevel in [2, 3]) {
+          final result = engine.gate(<String, dynamic>{
+            'action': 'send',
+            'input': 'person@example.com',
+          }, riskLevel: riskLevel);
+
+          expect(result.allowed, isTrue);
+          expect(result.message, isA<String>());
+          expect(result.message, contains('send'));
+          expect(result.needsConfirmation, isTrue);
+          expect(result.needsBiometric, isTrue);
+        }
+
+        expect(engine.requireBiometric, isTrue);
+      },
+    );
   });
 }

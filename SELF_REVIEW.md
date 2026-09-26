@@ -85,6 +85,7 @@
 - **Production backend wiring**: Command Centre streaming, Live Task View, Usage Dashboard, Skill Manager and Safety Center all have real screens and real tests, but no production backend is bound to them yet — they render their empty/injected states at runtime until one is.
 - **D6 Usage Dashboard / D7 Skill Manager / D9 Safety Center**: Screens now take injected state (`UsageSnapshot`, `SkillRecord`, policy gate) and show loading/empty/error states instead of fabricated numbers. No backend still feeds them in production.
 - **Native Android integration (MethodChannel)**: `MainActivity.kt` gate enforced; full `dispatchGesture()` integration with real `AccessibilityService` call requires runtime testing on device.
+- **MCP server configuration (added 2026-09-26)**: `lib/core/mcp_composition.dart` is the real composition root — a persisted `McpServerRecord` becomes a live adapter behind `PolicyEngine`, and an empty configuration means the app has no MCP capability at all. Verified on `feature/mcp-wiring` (1fa8228): `flutter analyze` clean, 758 tests passing. The whole-app export now includes `mcp_servers` (secret references only, redacted).
 
 ---
 

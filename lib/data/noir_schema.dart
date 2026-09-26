@@ -25,6 +25,10 @@ abstract final class NoirSchema {
   static const int usageVersion = 1;
   static const int jobsVersion = 1;
 
+  /// MCP server records are at v1: the first shape already keeps the bearer
+  /// token behind a secret reference, so there is no plaintext migration to do.
+  static const int mcpServersVersion = 1;
+
   /// Builds the catalog. [secrets] is required for the provider-settings
   /// migration: it is the boundary that moves a v1 plaintext key out of the
   /// record and behind the secret provider.
@@ -87,6 +91,12 @@ abstract final class NoirSchema {
     );
     catalog.register(
       CollectionSchema(name: NoirCollections.jobs, currentVersion: jobsVersion),
+    );
+    catalog.register(
+      CollectionSchema(
+        name: NoirCollections.mcpServers,
+        currentVersion: mcpServersVersion,
+      ),
     );
     return catalog;
   }

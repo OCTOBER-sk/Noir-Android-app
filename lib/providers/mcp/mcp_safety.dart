@@ -10,7 +10,9 @@
 //   1. the operator's own [MCPToolDef] on the allowlist (they know their tool);
 //   2. the server's MCP `annotations` (readOnlyHint / destructiveHint /
 //      openWorldHint) — but only when they do not contradict the tool's name;
-//   3. the tool's name and description (deterministic verb matching);
+//   3. the tool's name and description, matched word by word (deterministic verb
+//      matching — a verb has to start a word, so `focus_input` is a screen tool
+//      and not an HTTP PUT);
 //   4. nothing usable, in which case the tool FAILS CLOSED at HIGH_RISK.
 //
 // An operator override may say "background safe" but it can never erase a
@@ -250,10 +252,11 @@ class McpToolClassifier {
     bool? overrideBackgroundSafe,
     bool? overrideUiBound,
   }) {
-    final String haystack = '$name $description'.toLowerCase();
-    final bool reads = _matchesAny(haystack, kMcpReadVerbs);
-    final bool drives = _matchesAny(haystack, kMcpUiVerbs);
-    final bool mutates = _matchesAny(haystack, kMcpMutationVerbs);
+    // A tool is named by its words, so the verbs are matched word by word.
+    final List<String> words = _words('$name $description');
+    final bool reads = _matchesAny(words, kMcpReadVerbs);
+    final bool drives = _matchesAny(words, kMcpUiVerbs);
+    final bool mutates = _matchesAny(words, kMcpMutationVerbs);
 
     final bool? readOnlyHint = _boolHint(annotations, 'readOnlyHint');
     final bool? destructiveHint = _boolHint(annotations, 'destructiveHint');
@@ -355,9 +358,31 @@ class McpToolClassifier {
     return value is bool ? value : null;
   }
 
-  static bool _matchesAny(String haystack, List<String> verbs) {
-    for (final String verb in verbs) {
-      if (haystack.contains(verb)) return true;
+  /// Splits [text] into lowercase words on everything that is not a letter or a
+  /// digit, so `read_note`, `readNote`, `read-note` and "read note" all yield the
+  /// word `read`, and `focus_input` yields two words rather than one blob.
+  static List<String> _words(String text) => text
+      .toLowerCase()
+      .split(RegExp('[^a-z0-9]+'))
+      .where((String word) => word.isNotEmpty)
+      .toList(growable: false);
+
+  /// Whether any word in [words] *starts* with one of [verbs].
+  ///
+  /// Word-anchored on purpose. A bare substring match invents facts out of
+  /// unrelated words: "computer" and "focus_input" both contain "put", the HTTP
+  /// verb, so a screen-bound tool that moves no data would be classified
+  /// destructive at HIGH_RISK, would need a biometric Noir cannot perform, and
+  /// would never be callable at all. A prefix match still reads `read_note` and
+  /// `readNote` as reads, and it is strictly narrower than the substring match it
+  /// replaces, so it can only move a tool towards the `unknown-fail-closed`
+  /// HIGH_RISK default, never away from it: a verb no longer recognised this way
+  /// lands in the fail-closed branch above rather than being read as safe.
+  static bool _matchesAny(List<String> words, List<String> verbs) {
+    for (final String word in words) {
+      for (final String verb in verbs) {
+        if (word.startsWith(verb)) return true;
+      }
     }
     return false;
   }

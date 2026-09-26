@@ -85,7 +85,7 @@ class AgentAccessibilityService : AccessibilityService() {
   override fun onServiceConnected() {
     super.onServiceConnected()
     liveInstance = this
-    Log.i(TAG, "AccessibilityService connected; canPerformGestures=${serviceInfo?.canPerformGestures ?: false}")
+    Log.i(TAG, "AccessibilityService connected; canPerformGestures=${serviceInfo?.canPerformGestures() ?: false}")
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -249,7 +249,7 @@ class AgentAccessibilityService : AccessibilityService() {
     callback: AccessibilityService.GestureResultCallback
   ): Boolean {
     if (destroyed || liveInstance !== this) return false
-    if (serviceInfo?.canPerformGestures != true) {
+    if (serviceInfo?.canPerformGestures() != true) {
       Log.w(TAG, "canPerformGestures is not enabled; refusing to dispatch")
       return false
     }
@@ -272,8 +272,8 @@ class AgentAccessibilityService : AccessibilityService() {
     val nodes = latestNodes
     return mapOf(
       "serviceConnected" to (liveInstance === this),
-      "canPerformGestures" to (info?.canPerformGestures ?: false),
-      "canRetrieveWindowContent" to (info?.canRetrieveWindowContent ?: false),
+      "canPerformGestures" to (info?.canPerformGestures() ?: false),
+      "canRetrieveWindowContent" to (info?.canRetrieveWindowContent() ?: false),
       "hasNodeDump" to (nodes != null),
       "lastNodeCount" to (nodes?.size ?: 0),
       "runtimeSinkInstalled" to (runtimeSink != null)

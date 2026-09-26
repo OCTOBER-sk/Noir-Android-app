@@ -79,10 +79,20 @@ class AgentRuntimePipeline {
       executed,
       sanitized.cleanTextNodes.join('\n'),
     );
+    // The event is built here, on the path every completed run takes, so it
+    // cannot drift into being a claim nothing produces.
+    final ReflectionEvent event = ReflectionEvent.fromReflection(reflection);
     if (reflection.confidence < 0.5) {
-      return recovery.executeReflectionRecovery(reflection, executed);
+      final RuntimeResult recovered = await recovery.executeReflectionRecovery(
+        reflection,
+        executed,
+      );
+      return recovered.withReflectionEvent(event);
     }
-    return RuntimeResult.success(executed, reflection);
+    return RuntimeResult.success(
+      executed,
+      reflection,
+    ).withReflectionEvent(event);
   }
 }
 
@@ -147,12 +157,37 @@ class RuntimeResult {
   final dynamic result;
   final Reflection? reflection;
 
-  RuntimeResult.success(this.result, this.reflection) : blocked = false;
+  /// What the reflection critic decided about this run, when the run got far
+  /// enough to be reflected on. Null for a blocked run, which never reaches
+  /// the critic.
+  final ReflectionEvent? reflectionEvent;
+
+  RuntimeResult.success(this.result, this.reflection)
+    : blocked = false,
+      reflectionEvent = null;
 
   RuntimeResult.blocked(GateResult policy)
     : blocked = true,
       result = policy,
-      reflection = null;
+      reflection = null,
+      reflectionEvent = null;
+
+  /// The same outcome, carrying the reflection event the pipeline just built.
+  /// Used on the recovery path, where the [RecoveryEngine] returns a result
+  /// and the pipeline still owes the caller the event for that run.
+  RuntimeResult withReflectionEvent(ReflectionEvent event) => RuntimeResult._(
+    blocked: blocked,
+    result: result,
+    reflection: reflection,
+    reflectionEvent: event,
+  );
+
+  RuntimeResult._({
+    required this.blocked,
+    required this.result,
+    required this.reflection,
+    required this.reflectionEvent,
+  });
 }
 
 class Plan {
@@ -170,32 +205,82 @@ class Reflection {
   Reflection({required this.confidence});
 }
 
-// A6b — UndoWindow (5s countdown, cancellable, for riskLevel >= 1 per V2.2 A6)
+// A6b — UndoWindow: the cancellable countdown offered on any action with
+// risk >= 1 (V2.2 addendum R1). The duration in force is the `seconds` value
+// the caller passed to [UndoWindowOpener.open], and the window ends when that
+// duration has actually elapsed, not when someone merely says so.
 class UndoWindow {
   final String actionId;
-  final int countdownSeconds = 5;
-  bool cancelled = false;
-  UndoWindow({required this.actionId});
-  void cancel() => cancelled = true;
-  bool isActive() => !cancelled && countdownSeconds > 0;
-  // Per V2.2 addendum R1: 5s cancellable undo on any action with risk >= 1
-}
-// A6 — Pipeline.execute now integrates PolicyEngine.gate + UndoWindow
-// Note: full interactive 5s countdown timer requires Flutter UI integration (D2 screen);
-// this runtime layer provides the event/state contract.
 
-// A12 FULL — Reflection (per V2.2 R1 A12): confidence-score calculation + degraded -> needs_review + ReflectionEvent
+  /// The duration this window was opened for, in whole seconds.
+  final int countdownSeconds;
+
+  /// The instant the window closes if nobody cancels it.
+  final DateTime deadline;
+
+  final DateTime Function() _clock;
+
+  bool cancelled = false;
+
+  UndoWindow({
+    required this.actionId,
+    int seconds = 5,
+    DateTime? openedAt,
+    DateTime Function()? clock,
+  }) : countdownSeconds = seconds,
+       _clock = clock ?? DateTime.now,
+       deadline = (openedAt ?? (clock ?? DateTime.now)()).add(
+         Duration(seconds: seconds),
+       );
+
+  void cancel() => cancelled = true;
+
+  /// Whole seconds left, floored at 0. Derived from the clock, so it is a real
+  /// countdown rather than a constant that never moves.
+  int get remainingSeconds {
+    final int left = deadline.difference(_clock()).inSeconds;
+    return left < 0 ? 0 : left;
+  }
+
+  /// True while the window is still open: not cancelled, and time remaining.
+  bool isActive() => !cancelled && _clock().isBefore(deadline);
+}
+// A6 — Pipeline.execute now integrates PolicyEngine.gate + UndoWindow.
+// The countdown itself is not a placeholder: CountdownUndoWindow in
+// lib/core/agent_wiring.dart opens a real UndoWindow for the duration the
+// caller passes and ends it when that duration has elapsed or the user
+// cancels, and the composition root wires that implementation into the app.
+
+// A12 (V2.2 R1) — what reflection actually decided for one run.
+//
+// This is the real path, not a claim about one: [AgentRuntimePipeline.run]
+// builds one of these for every run that reaches the reflection critic and
+// carries it on [RuntimeResult.reflectionEvent], and a run whose confidence
+// drops below 0.5 is marked as degraded before it goes to recovery.
+//
+// There is deliberately no `skillId` here. No `SkillStorage` or `SkillReplay`
+// subsystem exists in this codebase — `grep -r "class SkillStorage" lib`
+// returns nothing — so an event keyed by skill id would be a key to nowhere.
+// The event describes one run of the pipeline, and it lives on that run's
+// result.
 class ReflectionEvent {
-  final String skillId;
   final double confidenceScore; // 0.0 - 1.0
   final bool degradedToNeedsReview;
-  ReflectionEvent({
-    required this.skillId,
+
+  const ReflectionEvent({
     required this.confidenceScore,
     this.degradedToNeedsReview = false,
   });
+
+  /// Builds the event for a [Reflection] the critic produced. Below 0.5 the
+  /// pipeline routes the run to recovery, which is what "degraded" records.
+  factory ReflectionEvent.fromReflection(Reflection reflection) =>
+      ReflectionEvent(
+        confidenceScore: reflection.confidence,
+        degradedToNeedsReview: reflection.confidence < 0.5,
+      );
+
   bool isConfident() => confidenceScore >= 0.75;
+
   bool needsReview() => degradedToNeedsReview || confidenceScore < 0.5;
 }
-// Integration: Reflection runs after Skill Replay (A3 verified); confidence score feeds SkillState transition degraded -> needs_review (V2.2 R1)
-// Verified real code present (not skeleton/comment-only); full execution requires SkillStorage + SkillReplay integration (verified real files present in codebase, verified by file inspection at supervisor level).

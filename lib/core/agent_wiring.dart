@@ -304,11 +304,13 @@ enum UndoOutcome {
 /// discarded.
 class CountdownUndoWindow implements UndoWindowOpener {
   CountdownUndoWindow({
-    UndoWindow Function({required String actionId})? windows,
+    UndoWindow Function({required String actionId, required int seconds})?
+    windows,
     this.publish,
   }) : _windows = windows ?? UndoWindow.new;
 
-  final UndoWindow Function({required String actionId}) _windows;
+  final UndoWindow Function({required String actionId, required int seconds})
+  _windows;
 
   /// Where the window is announced. The composition root forwards this to the
   /// UI event stream.
@@ -333,15 +335,20 @@ class CountdownUndoWindow implements UndoWindowOpener {
     }
     _sequence++;
     final String actionId = 'undo-$_sequence';
-    final UndoWindow window = _windows(actionId: actionId);
+    // The window is opened for exactly the duration the caller asked for, so
+    // `open(30, ...)` really does give the user 30 seconds.
+    final UndoWindow window = _windows(actionId: actionId, seconds: seconds);
     final Completer<UndoState> done = Completer<UndoState>();
     Timer? ticker;
     Timer? expiry;
     void finish(UndoOutcome outcome) {
+      // The one re-entrancy guard. It has to be the only guard: an earlier
+      // version also returned early when `_finishCurrent` was null, which sat
+      // between the guard and the publish, so the announcement and the outcome
+      // could be dropped even though the window had ended.
       if (done.isCompleted) return;
       ticker?.cancel();
       expiry?.cancel();
-      if (identical(_finishCurrent, null)) return;
       publish?.call(
         ActionCompletedWithUndoWindow(
           'action $actionId',
@@ -354,11 +361,15 @@ class CountdownUndoWindow implements UndoWindowOpener {
     }
 
     _finishCurrent = finish;
-    // A real countdown: the window stays open for [seconds] unless the user
-    // cancels it, and `UndoWindow.isActive` is what decides which happened.
+    // Two endings, and only two. Cancellation is the user's decision, reported
+    // as `cancelled`; running out of time is the clock's, reported as
+    // `elapsed`. The ticker watches only for the user's decision, so a window
+    // that simply times out is never mislabelled as a cancellation.
     ticker = Timer.periodic(const Duration(milliseconds: 250), (Timer timer) {
-      if (window.cancelled || !window.isActive()) {
+      if (window.cancelled) {
         finish(UndoOutcome.cancelled);
+      } else if (!window.isActive()) {
+        finish(UndoOutcome.elapsed);
       }
     });
     expiry = Timer(

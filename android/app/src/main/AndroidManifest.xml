@@ -1,16 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.noir.android"
     android:versionCode="203"
     android:versionName="2.3.0">
+    <!-- Model router / OpenRouter-compatible endpoints. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!--
+      NOTE: android.permission.BIND_ACCESSIBILITY_SERVICE is a signature-level
+      permission and must NOT be declared as <uses-permission>. It belongs on
+      the <service> as android:permission, which is what the system uses to
+      decide who may bind AgentAccessibilityService.
+
+      Neither ACCESS_NETWORK_STATE nor USE_BIOMETRIC is declared: no native
+      connectivity probe exists, and the A8 biometric gate is evaluated by the
+      Dart PolicyEngine while the native BiometricPrompt flow is not
+      implemented yet. Declaring unused permissions would be a false claim on
+      the app's permission surface.
+    -->
+
     <application
         android:label="Noir"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="false">
+        <!--
+          C1/C2: exported="true" is required so Settings can bind the service,
+          and android:permission="BIND_ACCESSIBILITY_SERVICE" is what restricts
+          binding to the system. The gesture capability itself is declared in
+          res/xml/accessibility_service_config.xml (canPerformGestures).
+        -->
         <service android:name=".AgentAccessibilityService"
                  android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
-                 android:exported="true">
+                 android:exported="true"
+                 android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService"/>
             </intent-filter>

@@ -19,6 +19,7 @@ class HierarchicalRecovery {
 void executeReflectionRecovery(HierarchicalRecovery r, {required dynamic sanitizedScreen}) {
   // A4 full: executes recovery when confidence < 0.5 (scaled < 50); uses sanitized screen content; logs audit.
   // Never bypasses PolicyEngine gate (C2 enforced) before any retry action.
-  final audit = r.auditLog();
-  // Log audit locally (structured) for Safety Center D9
+  // The audit entry is produced here but not yet forwarded anywhere: the Safety
+  // Center (D9) event bus does not exist yet, so nothing is stored or claimed.
+  r.auditLog();
 }

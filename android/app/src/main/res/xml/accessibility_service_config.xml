@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-    <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
+<!--
+  AgentAccessibilityService (C1/C2) service declaration.
+
+  canPerformGestures="true" is REQUIRED: without it
+  AccessibilityService.dispatchGesture() always returns false and every
+  MainActivity.executeGesture() call fails with GESTURE_DISPATCH_REJECTED.
+  canRetrieveWindowContent="true" is required for rootInActiveWindow.
+  flagReportViewIds makes viewIdResourceName meaningful for node identity.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged|typeWindowChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds"
+    android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="100" />

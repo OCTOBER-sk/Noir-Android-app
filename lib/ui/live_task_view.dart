@@ -53,7 +53,7 @@ class LiveTaskView extends StatelessWidget {
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF000000).withOpacity(0.4),
+                          color: const Color(0xFF000000).withValues(alpha: 0.4),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),

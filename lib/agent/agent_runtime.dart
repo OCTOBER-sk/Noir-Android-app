@@ -1,16 +1,17 @@
 import 'dart:async';
-import '../safety/risk_classifier.dart';
-import '../safety/screen_content_sanitizer.dart';
-import '../safety/policy_engine.dart';
-import '../agent/recovery_engine.dart';
+
+import '../safety/policy_engine.dart' show GateResult, PolicyEngine;
+import '../safety/risk_classifier.dart' show RiskClassifier, RiskLevel;
+import '../safety/screen_content_sanitizer.dart'
+    show SanitizedResult, Sanitizer;
 
 class AgentRuntimePipeline {
   final Planner planner;
   final RiskClassifier riskClassifier;
-  final ScreenContentSanitizer sanitizer;
+  final ScreenSanitizer sanitizer;
   final PolicyEngine policyEngine;
   final Gate gate;
-  final UndoWindow undoWindow;
+  final UndoWindowOpener undoWindow;
   final Executor execute;
   final ReflectionCritic reflectionCritic;
   final RecoveryEngine recovery;
@@ -18,55 +19,96 @@ class AgentRuntimePipeline {
   AgentRuntimePipeline({
     required this.planner,
     required this.riskClassifier,
-    required this.sanitizer,
     required this.policyEngine,
     required this.gate,
     required this.undoWindow,
     required this.execute,
     required this.reflectionCritic,
     required this.recovery,
-  });
+    ScreenSanitizer? sanitizer,
+  }) : sanitizer = sanitizer ?? Sanitizer.sanitize;
 
   Future<RuntimeResult> run(dynamic context) async {
-    // 1. Planner
     final plan = await planner.plan(context);
-    // 2. RiskClassifier
-    final risk = await riskClassifier.classify(plan);
-    // 3. Sanitizer
-    final clean = await sanitizer.sanitize(plan.content);
-    // 4. PolicyEngine
-    final policy = await policyEngine.evaluate(clean, risk);
-    // 5. Gate
-    final allowed = await gate.check(policy, risk);
-    if (!allowed) return RuntimeResult.blocked(risk, policy);
-    // 6. UndoWindow (5s) — A6b
-    final undo = await undoWindow.open(5, allowed: risk.level >= 1);
-    // Emit undo event for D15 when applicable
-    if (risk.level >= 1) {
-      // Event emitted for Flutter layer (D15 UndoToast)
+
+    late final RiskLevel risk;
+    try {
+      risk = await riskClassifier.classify(plan.content);
+    } catch (_) {
+      return RuntimeResult.blocked(
+        GateResult.blocked('RISK_CLASSIFICATION_FAILED'),
+      );
     }
-    // 7. Execute
+
+    late final SanitizedResult sanitized;
+    try {
+      sanitized = await sanitizer(plan.screenNodes);
+    } catch (_) {
+      return RuntimeResult.blocked(
+        GateResult.blocked('MALFORMED_SCREEN_CONTENT'),
+      );
+    }
+
+    late final GateResult policy;
+    try {
+      policy = policyEngine.gate(plan.content, riskLevel: risk.level);
+    } catch (_) {
+      return RuntimeResult.blocked(GateResult.blocked('POLICY_ERROR'));
+    }
+
+    if (!policy.allowed) {
+      return RuntimeResult.blocked(policy);
+    }
+
+    if (policy.needsConfirmation || policy.needsBiometric) {
+      final bool approved;
+      try {
+        approved = await gate.check(policy, risk);
+      } catch (_) {
+        return RuntimeResult.blocked(GateResult.blocked('GATE_ERROR'));
+      }
+      if (!approved) {
+        return RuntimeResult.blocked(policy);
+      }
+    }
+
+    await undoWindow.open(5, allowed: risk.level >= 1);
     final executed = await execute.run(plan);
-    // 8. Reflection / Critic (A12)
-    final reflection = await reflectionCritic.analyze(plan, executed, clean);
+    final reflection = await reflectionCritic.analyze(
+      plan,
+      executed,
+      sanitized.cleanTextNodes.join('\n'),
+    );
     if (reflection.confidence < 0.5) {
-      // 9. Recovery (A4) — hierarchical
-      return await recovery.executeReflectionRecovery(reflection, executed);
+      return recovery.executeReflectionRecovery(reflection, executed);
     }
     return RuntimeResult.success(executed, reflection);
   }
 }
 
-class Planner { Future<Plan> plan(dynamic c) async => Plan(); }
-class RiskClassifier { Future<RiskLevel> classify(dynamic p) async => RiskLevel(level: 0); }
-class ScreenContentSanitizer { Future<String> sanitize(String s) async => s; }
-class PolicyEngine { Future<Policy> evaluate(String c, RiskLevel r) async => Policy(); }
-class Gate { Future<bool> check(Policy p, RiskLevel r) async => true; }
-class UndoWindow { Future<UndoState> open(int seconds, {bool allowed = true}) async => UndoState(); }
-class Executor { Future<dynamic> run(Plan p) async => p; }
-class ReflectionCritic { Future<Reflection> analyze(Plan p, dynamic executed, String sanitizedScreenContent) async => Reflection(confidence: computeConfidence(p, executed, sanitizedScreenContent)); }
+abstract class Planner {
+  Future<Plan> plan(dynamic context);
+}
 
-class ReflectionCriticImpl implements ReflectionCritic {
+typedef ScreenSanitizer = FutureOr<SanitizedResult> Function(
+  List<dynamic> nodes,
+);
+
+abstract class Gate {
+  Future<bool> check(GateResult policy, RiskLevel risk);
+}
+
+abstract class UndoWindowOpener {
+  Future<UndoState> open(int seconds, {bool allowed = true});
+}
+
+abstract class Executor {
+  Future<dynamic> run(Plan plan);
+}
+
+class ReflectionCritic {
+  Future<Reflection> analyze(Plan p, dynamic executed, String sanitizedScreenContent) async => Reflection(confidence: computeConfidence(p, executed, sanitizedScreenContent));
+
   // A12 — real reflection: compares intended outcome (plan) vs observed screen state (executed result + sanitized content)
   // Produces confidence score 0.0-1.0; low confidence (<0.5) routes to HierarchicalRecovery (A4)
   double computeConfidence(Plan p, dynamic executed, String sanitizedContent) {
@@ -82,18 +124,43 @@ class ReflectionCriticImpl implements ReflectionCritic {
     return 0.92;
   }
 }
-class RecoveryEngine { Future<RuntimeResult> executeReflectionRecovery(Reflection r, dynamic e) async => RuntimeResult.blocked(r, Policy()); }
+
+class ReflectionCriticImpl extends ReflectionCritic {}
+
+abstract class RecoveryEngine {
+  Future<RuntimeResult> executeReflectionRecovery(
+    Reflection reflection,
+    dynamic executed,
+  );
+}
 
 class RuntimeResult {
-  final bool blocked; final dynamic result; final Reflection? reflection;
+  final bool blocked;
+  final dynamic result;
+  final Reflection? reflection;
+
   RuntimeResult.success(this.result, this.reflection) : blocked = false;
-  RuntimeResult.blocked(dynamic r, Policy p) : blocked = true, result = r, reflection = null;
+
+  RuntimeResult.blocked(GateResult policy)
+      : blocked = true,
+        result = policy,
+        reflection = null;
 }
-class Plan { String content = ''; }
-class RiskLevel { int level; RiskLevel({required this.level}); }
-class Policy {}
+
+class Plan {
+  final dynamic content;
+  final List<dynamic> screenNodes;
+
+  const Plan({this.content, this.screenNodes = const <dynamic>[]});
+}
+
 class UndoState {}
-class Reflection { double confidence; Reflection({required this.confidence}); }
+
+class Reflection {
+  final double confidence;
+
+  Reflection({required this.confidence});
+}
 
 // A6b — UndoWindow (5s countdown, cancellable, for riskLevel >= 1 per V2.2 A6)
 class UndoWindow {

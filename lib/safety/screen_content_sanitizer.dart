@@ -1,5 +1,8 @@
 // lib/safety/screen_content_sanitizer.dart
 // A6a — deterministic, NO LLM call.
+// The Reason values are the V2.2 E4 identifiers and are logged verbatim in the
+// Safety Center (D9), so the lowerCamelCase constant rule does not apply.
+// ignore_for_file: constant_identifier_names
 enum Reason { REASON_ZERO_ALPHA, REASON_OFF_SCREEN, REASON_ZERO_WIDTH, REASON_BIDI_OVERRIDE }
 
 class SanitizedItem {
@@ -35,7 +38,7 @@ class Sanitizer {
 
       // A6a: strip/flag nodes with zero alpha, zero bounds, off-viewport, bidi override, empty text, invisible
       if (alpha < 0.01 || offViewport || text.trim().isEmpty || hasBidi || !visible) {
-        Reason r = alpha < 0.01 ? Reason.REASON_ZERO_ALPHA
+        final Reason r = alpha < 0.01 ? Reason.REASON_ZERO_ALPHA
             : offViewport ? Reason.REASON_OFF_SCREEN
             : text.trim().isEmpty ? Reason.REASON_ZERO_WIDTH
             : hasBidi ? Reason.REASON_BIDI_OVERRIDE

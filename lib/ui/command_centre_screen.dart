@@ -1,36 +1,295 @@
 // lib/ui/command_centre_screen.dart — D2 FULL (V2.3 §2.1)
 // Professional, crystal-clear, real backend contracts only. Zero mock/fake data.
+//
+// Lifecycle: the screen owns a ConversationController (unless one is injected),
+// subscribes to its event stream, renders controller state as messages, and
+// routes every visible control to a real handler or an explicitly disabled state.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
+import '../core/conversation_controller.dart';
 import '../core/theme/noir_theme.dart';
 import '../core/ui_state_contract.dart';
+import '../platform/accessibility_status.dart';
+import '../platform/native_bridge.dart';
+import '../providers/usage_tracker.dart';
+import 'accessibility_status_view.dart';
+import 'safety_center_screen.dart';
+
+/// Streams an assistant reply for a submitted prompt onto [controller].
+///
+/// The responder must call [ConversationController.beginAssistantMessage],
+/// then [ConversationController.appendAssistantDelta] for each chunk and
+/// [ConversationController.stopActiveStream] when finished. Production wires no
+/// responder yet, so the screen reports that nothing was generated instead of
+/// inventing a reply. Tests inject a responder to drive the real streaming path.
+typedef AssistantResponder = void Function(
+  String prompt,
+  ConversationController controller,
+);
+
+/// One row of the Command Centre timeline, in submission order.
+sealed class _TimelineItem {
+  const _TimelineItem();
+}
+
+class _MessageItem extends _TimelineItem {
+  final String messageId;
+
+  const _MessageItem(this.messageId);
+}
+
+class _PipelineEventItem extends _TimelineItem {
+  final NoirUiEvent event;
+
+  const _PipelineEventItem(this.event);
+}
+
+class _SystemNoteItem extends _TimelineItem {
+  final String text;
+
+  const _SystemNoteItem(this.text);
+}
 
 class CommandCentreScreen extends StatefulWidget {
-  const CommandCentreScreen({super.key});
+  const CommandCentreScreen({
+    super.key,
+    this.controller,
+    this.responder,
+    this.usage,
+    this.bridge,
+  });
+
+  /// Injected in tests. Production leaves it null and the screen owns the
+  /// controller it creates in [State.initState].
+  final ConversationController? controller;
+
+  /// Null means "no assistant backend connected" — never a fabricated reply.
+  final AssistantResponder? responder;
+
+  /// Null means no usage has been recorded by a tracker yet.
+  final UsageTracker? usage;
+
+  /// The accessibility bridge. Null uses the process-wide
+  /// [NativeBridge.instance]; tests inject their own so they can mock the
+  /// channel. The screen only ever reads status through it — it never touches
+  /// a MethodChannel, and it never dispatches a gesture.
+  final NativeBridge? bridge;
 
   @override
   State<CommandCentreScreen> createState() => _CommandCentreScreenState();
 }
 
-class _CommandCentreScreenState extends State<CommandCentreScreen> with TickerProviderStateMixin {
-  final List<NoirUiEvent> _events = [];
-  bool _streamActive = false;
+class _CommandCentreScreenState extends State<CommandCentreScreen>
+    with TickerProviderStateMixin {
+  static const String _noBackendNote =
+      'No assistant backend is connected — nothing was generated.';
+
+  final TextEditingController _composer = TextEditingController();
+  final FocusNode _composerFocus = FocusNode();
+  final ScrollController _scroll = ScrollController();
+  final List<_TimelineItem> _timeline = <_TimelineItem>[];
+  final Set<String> _renderedMessageIds = <String>{};
+
+  late ConversationController _controller;
+  late bool _ownsController;
+  late AccessibilityStatusController _accessibility;
+  StreamSubscription<NoirUiEvent>? _events;
   bool _showSkeleton = false;
-  late final AnimationController _loaderAnim = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
+  bool _pipelineStreaming = false;
+  late final AnimationController _loaderAnim = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  )..repeat();
+
+  @override
+  void initState() {
+    super.initState();
+    _bindController(widget.controller, owns: widget.controller == null);
+    _bindAccessibility(widget.bridge);
+  }
+
+  @override
+  void didUpdateWidget(CommandCentreScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.bridge, widget.bridge)) {
+      _unbindAccessibility();
+      _bindAccessibility(widget.bridge);
+    }
+    if (identical(oldWidget.controller, widget.controller)) {
+      return;
+    }
+    // Release the previous binding before adopting the new one, so the
+    // subscription stops driving this State and a controller this screen
+    // created itself is closed. An injected controller is never closed here:
+    // its owner stays responsible for its lifetime.
+    _unbindController();
+    _timeline.clear();
+    _renderedMessageIds.clear();
+    _bindController(widget.controller, owns: widget.controller == null);
+  }
 
   @override
   void dispose() {
+    _unbindController();
+    _unbindAccessibility();
+    _composer.dispose();
+    _composerFocus.dispose();
+    _scroll.dispose();
     _loaderAnim.dispose();
     super.dispose();
   }
 
+  /// Subscribes to the live accessibility status and asks for it immediately.
+  /// A failure to answer renders as "service off"; it never throws here.
+  void _bindAccessibility(NativeBridge? bridge) {
+    _accessibility = AccessibilityStatusController(bridge: bridge)
+      ..addListener(_onAccessibilityChanged);
+    unawaited(_accessibility.refresh());
+  }
+
+  void _unbindAccessibility() {
+    _accessibility.removeListener(_onAccessibilityChanged);
+    _accessibility.dispose();
+  }
+
+  void _onAccessibilityChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// Binds [injected] (or a fresh controller when it is null) and subscribes to
+  /// its events. [owns] records whether this screen created the controller and
+  /// is therefore responsible for closing it.
+  void _bindController(ConversationController? injected, {required bool owns}) {
+    _controller = injected ?? ConversationController();
+    _ownsController = owns;
+    _events = _controller.events.listen(_onControllerEvent);
+  }
+
+  /// Cancels the event subscription and closes the controller only if this
+  /// screen owns it. Safe to call more than once.
+  void _unbindController() {
+    final subscription = _events;
+    _events = null;
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
+    if (_ownsController) {
+      unawaited(_controller.close());
+      _ownsController = false;
+    }
+  }
+
+  /// Reduces controller events into timeline rows — never invents content.
+  void _onControllerEvent(NoirUiEvent event) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      switch (event) {
+        case UserMessageSubmitted(:final messageId):
+          _addMessageItem(messageId);
+        case AssistantMessageStarted(:final messageId):
+          _addMessageItem(messageId);
+        default:
+          break;
+      }
+    });
+    _scrollToEnd();
+  }
+
+  /// Idempotent so a message can be rendered the moment it is submitted,
+  /// without the asynchronous event adding a second row for it.
+  void _addMessageItem(String messageId) {
+    if (!_renderedMessageIds.add(messageId)) {
+      return;
+    }
+    _timeline.add(_MessageItem(messageId));
+  }
+
   /// Receives REAL events from AgentRuntime (not invented).
   void pushRealEvent(NoirUiEvent event) {
+    if (!mounted) {
+      return;
+    }
     setState(() {
-      _events.add(event);
-      if (event is StreamingTokenReceived) _streamActive = true;
-      if (event is ToolCallStarted) _showSkeleton = true;
-      if (event is ActionCompletedWithUndoWindow) _showSkeleton = false;
+      _timeline.add(_PipelineEventItem(event));
+      if (event is StreamingTokenReceived) {
+        _pipelineStreaming = true;
+      }
+      if (event is ToolCallStarted) {
+        _showSkeleton = true;
+      }
+      if (event is ActionCompletedWithUndoWindow) {
+        _showSkeleton = false;
+      }
     });
+    _scrollToEnd();
+  }
+
+  void _handleActionButton() {
+    if (_controller.hasActiveStream) {
+      _controller.stopActiveStream();
+      setState(() {});
+      return;
+    }
+
+    final prompt = _composer.text.trim();
+    if (prompt.isEmpty) {
+      return;
+    }
+
+    final submitted = _controller.submitUserMessage(prompt);
+    _composer.clear();
+
+    final responder = widget.responder;
+    setState(() {
+      _addMessageItem(submitted.id);
+      if (responder == null) {
+        _timeline.add(const _SystemNoteItem(_noBackendNote));
+      }
+    });
+    if (responder != null) {
+      responder(prompt, _controller);
+    }
+    _scrollToEnd();
+  }
+
+  void _prefillComposer(String prompt) {
+    _composer
+      ..text = prompt
+      ..selection = TextSelection.collapsed(offset: prompt.length);
+    setState(() {});
+    _composerFocus.requestFocus();
+  }
+
+  void _scrollToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) {
+        return;
+      }
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    });
+  }
+
+  /// Opens the Safety Center, which is where the real accessibility status and
+  /// the real A6a screen audit live. The same bridge instance is handed over so
+  /// the two screens never disagree about what the service is doing.
+  void _openSafetyCenter() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SafetyCenterScreen(bridge: widget.bridge),
+      ),
+    );
+  }
+
+  String _usageLabel() {
+    final usage = widget.usage;
+    if (usage == null) {
+      return 'Usage idle';
+    }
+    return 'in ${usage.rpmUsed}  out ${usage.tokensUsed}';
   }
 
   @override
@@ -49,7 +308,12 @@ class _CommandCentreScreenState extends State<CommandCentreScreen> with TickerPr
         child: SafeArea(
           child: Column(
             children: [
-              _HeaderBar(streamActive: _streamActive),
+              _HeaderBar(
+                streamActive: _controller.hasActiveStream || _pipelineStreaming,
+                usageLabel: _usageLabel(),
+                accessibilityStatus: _accessibility.status,
+                onOpenSafetyCenter: _openSafetyCenter,
+              ),
               Expanded(child: _buildMessageArea()),
               const SizedBox(height: 8),
               _buildComposer(),
@@ -62,20 +326,40 @@ class _CommandCentreScreenState extends State<CommandCentreScreen> with TickerPr
   }
 
   Widget _buildMessageArea() {
-    if (_events.isEmpty) {
-      return _EmptyState();
+    if (_timeline.isEmpty) {
+      return _EmptyState(onSuggestionSelected: _prefillComposer);
     }
     return ListView.builder(
+      controller: _scroll,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      itemCount: _events.length + (_showSkeleton ? 1 : 0),
+      itemCount: _timeline.length + (_showSkeleton ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index == _events.length && _showSkeleton) {
+        if (index == _timeline.length) {
           return _SkeletonLoader(animation: _loaderAnim);
         }
-        final event = _events[index];
-        return _MessageRow(event: event);
+        return _buildTimelineRow(_timeline[index]);
       },
     );
+  }
+
+  Widget _buildTimelineRow(_TimelineItem item) {
+    if (item is _MessageItem) {
+      final message = _controller.messageById(item.messageId);
+      if (message == null) {
+        return const SizedBox.shrink();
+      }
+      return _ConversationRow(
+        message: message,
+        loaderAnimation: _loaderAnim,
+      );
+    }
+    if (item is _PipelineEventItem) {
+      return _MessageRow(event: item.event);
+    }
+    if (item is _SystemNoteItem) {
+      return _MicroCopyLine(text: item.text);
+    }
+    return const SizedBox.shrink();
   }
 
   Widget _buildComposer() {
@@ -87,7 +371,12 @@ class _CommandCentreScreenState extends State<CommandCentreScreen> with TickerPr
         borderRadius: BorderRadius.circular(32),
         border: Border.all(color: const Color(0xFF222222), width: 1),
         boxShadow: [
-          BoxShadow(color: const Color(0xFF000000).withOpacity(0.6), blurRadius: 20, spreadRadius: 2, offset: const Offset(0, 8)),
+          BoxShadow(
+            color: const Color(0xFF000000).withValues(alpha: 0.6),
+            blurRadius: 20,
+            spreadRadius: 2,
+            offset: const Offset(0, 8),
+          ),
         ],
       ),
       child: Row(
@@ -96,90 +385,227 @@ class _CommandCentreScreenState extends State<CommandCentreScreen> with TickerPr
           Expanded(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-              child: const Text('Ask Noir anything...',
-                  style: TextStyle(color: Color(0xFF888888), fontSize: 15, fontWeight: FontWeight.w400, letterSpacing: -0.2)),
-            ),
-          ),
-          const SizedBox(width: 8),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: _streamActive
-                  ? const LinearGradient(colors: [Color(0xFF333333), Color(0xFF1A1A1A)])
-                  : const LinearGradient(colors: [Color(0xFFE5E5E5), Color(0xFFFFFFFF)]),
-              boxShadow: [
-                BoxShadow(color: const Color(0xFFFFFFFF).withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 2)),
-              ],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {},
-                borderRadius: BorderRadius.circular(24),
-                child: Center(
-                  child: Icon(
-                    _streamActive ? Icons.stop_rounded : Icons.arrow_upward_rounded,
-                    size: 22,
-                    color: _streamActive ? const Color(0xFFFFFFFF) : const Color(0xFF000000),
+              child: TextField(
+                controller: _composer,
+                focusNode: _composerFocus,
+                onChanged: (_) => setState(() {}),
+                minLines: 1,
+                maxLines: 4,
+                keyboardType: TextInputType.multiline,
+                cursorColor: const Color(0xFFB0B0B0),
+                style: const TextStyle(
+                  color: Color(0xFF888888),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: -0.2,
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                  hintText: 'Ask Noir anything...',
+                  hintStyle: TextStyle(
+                    color: Color(0xFF888888),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w400,
+                    letterSpacing: -0.2,
                   ),
                 ),
               ),
             ),
           ),
+          const SizedBox(width: 8),
+          _buildActionButton(),
         ],
+      ),
+    );
+  }
+
+  /// Single real control: stop the active stream, or send the composed prompt.
+  /// When neither is possible the button is rendered — and announced — disabled.
+  Widget _buildActionButton() {
+    final isStop = _controller.hasActiveStream;
+    final canAct = isStop || _composer.text.trim().isNotEmpty;
+    return Semantics(
+      button: true,
+      enabled: canAct,
+      label: isStop ? 'Stop' : 'Send',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: canAct
+              ? isStop
+                  ? const LinearGradient(
+                      colors: [Color(0xFF333333), Color(0xFF1A1A1A)],
+                    )
+                  : const LinearGradient(
+                      colors: [Color(0xFFE5E5E5), Color(0xFFFFFFFF)],
+                    )
+              : const LinearGradient(
+                  colors: [Color(0xFF1A1A1A), Color(0xFF1A1A1A)],
+                ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFFFFFF).withValues(alpha: 0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: canAct ? _handleActionButton : null,
+            borderRadius: BorderRadius.circular(24),
+            child: Center(
+              child: Icon(
+                isStop ? Icons.stop_rounded : Icons.arrow_upward_rounded,
+                size: 22,
+                color: !canAct
+                    ? const Color(0xFF4A4A4A)
+                    : isStop
+                    ? const Color(0xFFFFFFFF)
+                    : const Color(0xFF000000),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
-/// Clean, minimal header with real stream state.
+/// Clean, minimal header with real stream state and the live service status.
 class _HeaderBar extends StatelessWidget {
+  const _HeaderBar({
+    required this.streamActive,
+    required this.usageLabel,
+    required this.accessibilityStatus,
+    required this.onOpenSafetyCenter,
+  });
+
   final bool streamActive;
-  const _HeaderBar({required this.streamActive});
+  final String usageLabel;
+  final AccessibilityStatus accessibilityStatus;
+  final VoidCallback onOpenSafetyCenter;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: const Color(0xFF1A1A1A), width: 1)),
+        border: Border(
+          bottom: BorderSide(color: const Color(0xFF1A1A1A), width: 1),
+        ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('NOIr', style: TextStyle(color: Color(0xFFFFFFFF), fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: 6)),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1A1A1A),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: const Text('PRO', style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 9, fontWeight: FontWeight.w600, letterSpacing: 0.4)),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Text(
+                'NOIr',
+                style: TextStyle(
+                  color: Color(0xFFFFFFFF),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 6,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'PRO',
+                  style: TextStyle(
+                    color: Color(0xFFB0B0B0),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              AnimatedOpacity(
+                opacity: streamActive ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 300),
+                child: Text(
+                  'Streaming…',
+                  style: TextStyle(
+                    color: Color(0xFF888888),
+                    fontSize: 11,
+                    letterSpacing: 0.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161616),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.memory_rounded,
+                      size: 14,
+                      color: Color(0xFF888888),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      usageLabel,
+                      style: const TextStyle(
+                        color: Color(0xFF888888),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const Spacer(),
-          AnimatedOpacity(
-            opacity: streamActive ? 1.0 : 0.0,
-            duration: const Duration(milliseconds: 300),
-            child: Text('Streaming…', style: TextStyle(color: Color(0xFF888888), fontSize: 11, letterSpacing: 0.5, fontWeight: FontWeight.w500)),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF161616),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.memory_rounded, size: 14, color: Color(0xFF888888)),
-                const SizedBox(width: 6),
-                const Text(r'in 0  out 0  $0.00', style: TextStyle(color: Color(0xFF888888), fontSize: 11, fontWeight: FontWeight.w400)),
-              ],
-            ),
+          // The service status lives on its own line: the row above is already
+          // at its width budget on a 360dp phone, and an overflowing header
+          // would be a worse regression than a slightly taller one.
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              AccessibilityStatusPill(
+                status: accessibilityStatus,
+                onTap: onOpenSafetyCenter,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  accessibilityStatus.headline,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF5A5A5A),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -187,31 +613,47 @@ class _HeaderBar extends StatelessWidget {
   }
 }
 
-/// Quick-action chip for empty state interactivity.
+/// Quick-action chip: fills the real composer, never fabricates a prompt run.
 class _ActionChip extends StatelessWidget {
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
   final IconData icon;
   final String label;
-  const _ActionChip({required this.icon, required this.label});
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {},
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A1A1A),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: const Color(0xFF888888)),
-            const SizedBox(width: 6),
-            Text(label, style: const TextStyle(color: Color(0xFFE5E5E5), fontSize: 12, fontWeight: FontWeight.w500)),
-          ],
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: const Color(0xFF888888)),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFFE5E5E5),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -220,6 +662,10 @@ class _ActionChip extends StatelessWidget {
 
 /// Professional empty state — no fake data, clean typography.
 class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onSuggestionSelected});
+
+  final ValueChanged<String> onSuggestionSelected;
+
   @override
   Widget build(BuildContext context) {
     return Center(
@@ -233,23 +679,57 @@ class _EmptyState extends StatelessWidget {
               color: const Color(0xFF1A1A1A),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: const Icon(Icons.chat_bubble_outline, color: Color(0xFFFFFFFF), size: 24),
+            child: const Icon(
+              Icons.chat_bubble_outline,
+              color: Color(0xFFFFFFFF),
+              size: 24,
+            ),
           ),
           const SizedBox(height: 24),
-          const Text('Noir Command Centre',
-              style: TextStyle(color: Color(0xFFFFFFFF), fontSize: 22, fontWeight: FontWeight.w400, letterSpacing: -0.3)),
+          const Text(
+            'Noir Command Centre',
+            style: TextStyle(
+              color: Color(0xFFFFFFFF),
+              fontSize: 22,
+              fontWeight: FontWeight.w400,
+              letterSpacing: -0.3,
+            ),
+          ),
           const SizedBox(height: 6),
-          const Text('On-device automation with real-time verification.',
-              style: TextStyle(color: Color(0xFF888888), fontSize: 13, height: 1.5, fontWeight: FontWeight.w400)),
+          const Text(
+            'On-device automation with real-time verification.',
+            style: TextStyle(
+              color: Color(0xFF888888),
+              fontSize: 13,
+              height: 1.5,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
           const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _ActionChip(icon: Icons.auto_awesome, label: 'Auto-tasks'),
+              _ActionChip(
+                icon: Icons.auto_awesome,
+                label: 'Auto-tasks',
+                onPressed: () => onSuggestionSelected(
+                  'Summarise today\'s automation tasks.',
+                ),
+              ),
               const SizedBox(width: 8),
-              _ActionChip(icon: Icons.search_rounded, label: 'Search web'),
+              _ActionChip(
+                icon: Icons.search_rounded,
+                label: 'Search web',
+                onPressed: () => onSuggestionSelected('Search the web for Noir.'),
+              ),
               const SizedBox(width: 8),
-              _ActionChip(icon: Icons.shield_rounded, label: 'Safety checks'),
+              _ActionChip(
+                icon: Icons.shield_rounded,
+                label: 'Safety checks',
+                onPressed: () => onSuggestionSelected(
+                  'Run the safety checks before acting.',
+                ),
+              ),
             ],
           ),
         ],
@@ -260,8 +740,9 @@ class _EmptyState extends StatelessWidget {
 
 /// Animated skeleton loader with smooth rainbow gradient tip — real contract-bound.
 class _SkeletonLoader extends StatelessWidget {
-  final AnimationController animation;
   const _SkeletonLoader({required this.animation});
+
+  final AnimationController animation;
 
   @override
   Widget build(BuildContext context) {
@@ -276,13 +757,19 @@ class _SkeletonLoader extends StatelessWidget {
               Container(
                 height: 14,
                 width: 260,
-                decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(6)),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF222222),
+                  borderRadius: BorderRadius.circular(6),
+                ),
               ),
               const SizedBox(height: 8),
               Container(
                 height: 14,
                 width: 160,
-                decoration: BoxDecoration(color: const Color(0xFF222222), borderRadius: BorderRadius.circular(6)),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF222222),
+                  borderRadius: BorderRadius.circular(6),
+                ),
               ),
               const SizedBox(height: 8),
               // Animated rainbow-shifting loader tip (tiny accent, smoothly cycling)
@@ -310,41 +797,75 @@ class _SkeletonLoader extends StatelessWidget {
   }
 }
 
-/// Each message row binds to a REAL NoirUiEvent subtype — never fabricated.
-class _MessageRow extends StatelessWidget {
-  final NoirUiEvent event;
-  const _MessageRow({required this.event});
+/// Renders one conversation message from controller state only.
+class _ConversationRow extends StatelessWidget {
+  const _ConversationRow({
+    required this.message,
+    required this.loaderAnimation,
+  });
+
+  final ConversationMessage message;
+  final AnimationController loaderAnimation;
 
   @override
   Widget build(BuildContext context) {
-    // Security: never invent events. Only handle known subtypes.
-    if (event is StreamingTokenReceived) {
-      return _StreamingRow(delta: (event as StreamingTokenReceived).delta);
+    if (message.role == MessageRole.user) {
+      return _UserMessageRow(text: message.text);
     }
-    if (event is ToolCallStarted) {
-      return _MicroCopyLine(text: 'Using ${(event as ToolCallStarted).toolName}…');
+    if (message.text.isEmpty) {
+      if (message.isStreaming) {
+        return _SkeletonLoader(animation: loaderAnimation);
+      }
+      return const _MicroCopyLine(text: 'No content was returned.');
     }
-    if (event is ToolCallCompleted) {
-      return _MicroCopyLine(text: '${(event as ToolCallCompleted).toolName} completed.');
-    }
-    if (event is ConfirmationRequired) {
-      return _ConfirmationCard(event: event as ConfirmationRequired);
-    }
-    if (event is ActionCompletedWithUndoWindow) {
-      return UndoToast(event: event as ActionCompletedWithUndoWindow);
-    }
-    if (event is CostEstimateResolved) {
-      return _UsageRow(event: event as CostEstimateResolved);
-    }
-    // Fallback: render nothing silently rather than invent data.
-    return const SizedBox.shrink();
+    return _AssistantMessageRow(
+      text: message.text,
+      isStreaming: message.isStreaming,
+    );
   }
 }
 
-/// Professional streaming text reveal — token-by-token with blinking caret.
-class _StreamingRow extends StatelessWidget {
-  final String delta;
-  const _StreamingRow({required this.delta});
+/// User turn — right-aligned monochrome bubble.
+class _UserMessageRow extends StatelessWidget {
+  const _UserMessageRow({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 320),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1A),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF2A2A2A)),
+          ),
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Color(0xFFE5E5E5),
+              fontSize: 15,
+              height: 1.6,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Assistant turn — streamed text with a blinking caret while tokens arrive.
+class _AssistantMessageRow extends StatelessWidget {
+  const _AssistantMessageRow({required this.text, required this.isStreaming});
+
+  final String text;
+  final bool isStreaming;
 
   @override
   Widget build(BuildContext context) {
@@ -354,7 +875,75 @@ class _StreamingRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-            child: Text(delta, style: const TextStyle(color: Color(0xFFE5E5E5), fontSize: 15, height: 1.6, letterSpacing: 0.2)),
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xFFE5E5E5),
+                fontSize: 15,
+                height: 1.6,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          if (isStreaming) const AnimatedBlinkingCaret(),
+        ],
+      ),
+    );
+  }
+}
+
+/// Each message row binds to a REAL NoirUiEvent subtype — never fabricated.
+class _MessageRow extends StatelessWidget {
+  const _MessageRow({required this.event});
+
+  final NoirUiEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final event = this.event;
+    // Security: never invent events. Only handle known subtypes.
+    switch (event) {
+      case StreamingTokenReceived(:final delta):
+        return _StreamingRow(delta: delta);
+      case ToolCallStarted(:final toolName):
+        return _MicroCopyLine(text: 'Using $toolName…');
+      case ToolCallCompleted(:final toolName):
+        return _MicroCopyLine(text: '$toolName completed.');
+      case ConfirmationRequired():
+        return _ConfirmationCard(event: event);
+      case ActionCompletedWithUndoWindow():
+        return UndoToast(event: event);
+      case CostEstimateResolved():
+        return _UsageRow(event: event);
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+}
+
+/// Professional streaming text reveal — token-by-token with blinking caret.
+class _StreamingRow extends StatelessWidget {
+  const _StreamingRow({required this.delta});
+
+  final String delta;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              delta,
+              style: const TextStyle(
+                color: Color(0xFFE5E5E5),
+                fontSize: 15,
+                height: 1.6,
+                letterSpacing: 0.2,
+              ),
+            ),
           ),
           // Blinking caret — monochrome muted
           const AnimatedBlinkingCaret(),
@@ -367,21 +956,38 @@ class _StreamingRow extends StatelessWidget {
 /// Subtle monochrome blinking caret — no color urgency.
 class AnimatedBlinkingCaret extends StatefulWidget {
   const AnimatedBlinkingCaret({super.key});
+
   @override
   State<AnimatedBlinkingCaret> createState() => _AnimatedBlinkingCaretState();
 }
 
-class _AnimatedBlinkingCaretState extends State<AnimatedBlinkingCaret> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(duration: const Duration(milliseconds: 800), vsync: this)..repeat(reverse: true);
+class _AnimatedBlinkingCaretState extends State<AnimatedBlinkingCaret>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    duration: const Duration(milliseconds: 800),
+    vsync: this,
+  )..repeat(reverse: true);
+
   @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _ctrl,
       builder: (context, child) => Opacity(
         opacity: 0.3 + (_ctrl.value * 0.7),
-        child: const Text('▍', style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 16, fontWeight: FontWeight.w300)),
+        child: const Text(
+          '▍',
+          style: TextStyle(
+            color: Color(0xFFB0B0B0),
+            fontSize: 16,
+            fontWeight: FontWeight.w300,
+          ),
+        ),
       ),
     );
   }
@@ -389,22 +995,32 @@ class _AnimatedBlinkingCaretState extends State<AnimatedBlinkingCaret> with Sing
 
 /// Pipeline-stage micro-copy sourced from EventBus — never invented.
 class _MicroCopyLine extends StatelessWidget {
-  final String text;
   const _MicroCopyLine({required this.text});
+
+  final String text;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Text(text, style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12, letterSpacing: 0.3, fontWeight: FontWeight.w300)),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Color(0xFFB0B0B0),
+          fontSize: 12,
+          letterSpacing: 0.3,
+          fontWeight: FontWeight.w300,
+        ),
+      ),
     );
   }
 }
 
 /// Usage cost line — real contract-backed.
 class _UsageRow extends StatelessWidget {
-  final CostEstimateResolved event;
   const _UsageRow({required this.event});
+
+  final CostEstimateResolved event;
 
   @override
   Widget build(BuildContext context) {
@@ -412,18 +1028,37 @@ class _UsageRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Expanded(child: Text('Responding with ${event.model}', style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12))),
-          Expanded(child: Text('${event.provider}', style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 11, fontStyle: FontStyle.italic))),
+          Expanded(
+            child: Text(
+              'Responding with ${event.model}',
+              style: const TextStyle(
+                color: Color(0xFFB0B0B0),
+                fontSize: 12,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              event.provider,
+              style: const TextStyle(
+                color: Color(0xFFB0B0B0),
+                fontSize: 11,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
-/// Professional confirmation card — real PolicyEngine gate backing.
+/// Confirmation card — the policy gate is not wired yet, so both controls are
+/// rendered explicitly disabled instead of as dead, tappable-looking buttons.
 class _ConfirmationCard extends StatelessWidget {
-  final ConfirmationRequired event;
   const _ConfirmationCard({required this.event});
+
+  final ConfirmationRequired event;
 
   @override
   Widget build(BuildContext context) {
@@ -439,49 +1074,78 @@ class _ConfirmationCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(event.actionDescription,
-              style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 16, fontWeight: FontWeight.w500, letterSpacing: -0.2)),
+          Text(
+            event.actionDescription,
+            style: const TextStyle(
+              color: Color(0xFFFFFFFF),
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -0.2,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text('Risk tier: ${_tierLabel(event.riskTier)}',
-              style: const TextStyle(color: Color(0xFFE5E5E5), fontSize: 13)),
+          Text(
+            'Risk tier: ${_tierLabel(event.riskTier)}',
+            style: const TextStyle(color: Color(0xFFE5E5E5), fontSize: 13),
+          ),
           const SizedBox(height: 4),
           Row(
             children: [
-              Text('Tool: ${event.toolName}', style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12)),
+              Text(
+                'Tool: ${event.toolName}',
+                style: const TextStyle(
+                  color: Color(0xFFB0B0B0),
+                  fontSize: 12,
+                ),
+              ),
               const SizedBox(width: 12),
-              Text('Sanitized: ${event.screenContentWasSanitized ? "Yes" : "No"}', style: const TextStyle(color: Color(0xFFB0B0B0), fontSize: 12)),
+              Text(
+                'Sanitized: ${event.screenContentWasSanitized ? 'Yes' : 'No'}',
+                style: const TextStyle(
+                  color: Color(0xFFB0B0B0),
+                  fontSize: 12,
+                ),
+              ),
             ],
           ),
           if (event.screenContentWasSanitized) ...[
             const SizedBox(height: 6),
-            const Text('Some on-screen content was filtered as unsafe before this was proposed.',
-                style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 12, fontStyle: FontStyle.italic, height: 1.4)),
+            const Text(
+              'Some on-screen content was filtered as unsafe before this was proposed.',
+              style: TextStyle(
+                color: Color(0xFFB0B0B0),
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+                height: 1.4,
+              ),
+            ),
           ],
           const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFFFFF),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Center(child: Text('Confirm', style: TextStyle(color: Color(0xFF000000), fontSize: 14, fontWeight: FontWeight.w700))),
+                child: _CardActionButton(
+                  label: 'Confirm',
+                  filled: true,
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: const Color(0xFFE5E5E5), width: 1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Center(child: Text('Cancel', style: TextStyle(color: Color(0xFFE5E5E5), fontSize: 14, fontWeight: FontWeight.w500))),
+                child: _CardActionButton(
+                  label: 'Cancel',
+                  filled: false,
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Disabled: no policy gate is wired to this card yet.',
+            style: TextStyle(
+              color: Color(0xFF5A5A5A),
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ],
       ),
@@ -490,20 +1154,67 @@ class _ConfirmationCard extends StatelessWidget {
 
   String _tierLabel(int tier) {
     switch (tier) {
-      case 0: return 'Standard';
-      case 1: return 'Sensitive';
-      case 2: return 'Sensitive';
-      case 3: return 'High risk';
-      default: return 'Standard';
+      case 0:
+        return 'Standard';
+      case 1:
+        return 'Sensitive';
+      case 2:
+        return 'Sensitive';
+      case 3:
+        return 'High risk';
+      default:
+        return 'Standard';
     }
+  }
+}
+
+/// Card action that is either wired to a real handler or visibly disabled.
+class _CardActionButton extends StatelessWidget {
+  const _CardActionButton({
+    required this.label,
+    required this.filled,
+  });
+
+  final String label;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      enabled: false,
+      label: label,
+      child: Container(
+        height: 40,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          border: Border.all(color: const Color(0xFF3A3A3A), width: 1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: const Color(0xFF5A5A5A),
+            fontSize: 14,
+            fontWeight: filled ? FontWeight.w700 : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
   }
 }
 
 /// Undo toast — real event-backed, 5-second countdown, monochrome + rainbow tip.
 class UndoToast extends StatelessWidget {
+  const UndoToast({
+    super.key,
+    required this.event,
+    this.window = const Duration(seconds: 5),
+  });
+
   final ActionCompletedWithUndoWindow event;
   final Duration window;
-  const UndoToast({super.key, required this.event, this.window = const Duration(seconds: 5)});
 
   @override
   Widget build(BuildContext context) {
@@ -521,20 +1232,41 @@ class UndoToast extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${event.actionDescription} just happened.',
-                    style: const TextStyle(color: Color(0xFFFFFFFF), fontSize: 14, fontWeight: FontWeight.w500, letterSpacing: -0.1)),
+                Text(
+                  '${event.actionDescription} just happened.',
+                  style: const TextStyle(
+                    color: Color(0xFFFFFFFF),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.1,
+                  ),
+                ),
                 const SizedBox(height: 6),
                 if (event.reversible)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFEEEEEE), width: 1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text('Undo', style: TextStyle(color: Color(0xFFE5E5E5), fontSize: 12, fontWeight: FontWeight.w600)),
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _UndoActionButton(),
+                      SizedBox(height: 6),
+                      Text(
+                        'Disabled: undo is not wired to an action executor yet.',
+                        style: TextStyle(
+                          color: Color(0xFF5A5A5A),
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
                   )
                 else
-                  const Text('Irreversible action completed.', style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 12, fontStyle: FontStyle.italic)),
+                  const Text(
+                    'Irreversible action completed.',
+                    style: TextStyle(
+                      color: Color(0xFFB0B0B0),
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -546,17 +1278,59 @@ class UndoToast extends StatelessWidget {
   }
 }
 
-/// Smooth animated rainbow gradient countdown column.
-class AnimatedRainbowCountdown extends StatefulWidget {
-  final int duration;
-  const AnimatedRainbowCountdown({super.key, required this.duration});
+/// Undo control — rendered disabled until an action executor is wired.
+class _UndoActionButton extends StatelessWidget {
+  const _UndoActionButton();
 
   @override
-  State<AnimatedRainbowCountdown> createState() => _AnimatedRainbowCountdownState();
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      enabled: false,
+      label: 'Undo',
+      child: const SizedBox(
+        width: 60,
+        height: 28,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border.fromBorderSide(
+              BorderSide(color: Color(0xFF3A3A3A)),
+            ),
+            borderRadius: BorderRadius.all(Radius.circular(8)),
+          ),
+          child: Center(
+            child: Text(
+              'Undo',
+              style: TextStyle(
+                color: Color(0xFF5A5A5A),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _AnimatedRainbowCountdownState extends State<AnimatedRainbowCountdown> with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(duration: Duration(seconds: widget.duration), vsync: this);
+/// Smooth animated rainbow gradient countdown column.
+class AnimatedRainbowCountdown extends StatefulWidget {
+  const AnimatedRainbowCountdown({super.key, required this.duration});
+
+  final int duration;
+
+  @override
+  State<AnimatedRainbowCountdown> createState() =>
+      _AnimatedRainbowCountdownState();
+}
+
+class _AnimatedRainbowCountdownState extends State<AnimatedRainbowCountdown>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    duration: Duration(seconds: widget.duration),
+    vsync: this,
+  );
 
   @override
   void initState() {

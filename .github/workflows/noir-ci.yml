@@ -1,0 +1,127 @@
+name: Noir CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noir-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must match android/gradle/wrapper/gradle-wrapper.properties. The
+  # "Ensure Gradle wrapper" step fails loudly when the two drift apart.
+  GRADLE_VERSION: '8.14.3'
+
+jobs:
+  verify:
+    name: Flutter verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # Preserves the git file mode (android/gradlew must land as 0755).
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Wrapper acquisition fallback.
+      #
+      # android/gradlew, android/gradlew.bat and
+      # android/gradle/wrapper/gradle-wrapper.jar are required to build and are
+      # no longer git-ignored, so a normal checkout carries the whole wrapper
+      # and this step does nothing. If the JAR is ever missing (a clone that
+      # never ran `flutter build apk`), it is regenerated with the official
+      # `gradle wrapper` task using the distribution installed by
+      # gradle/actions/setup-gradle, pinned to GRADLE_VERSION.
+      #
+      # The task runs in a scratch directory: the wrapper files are
+      # project-independent boilerplate, and generating them outside the project
+      # avoids evaluating android/app/build.gradle (which would demand a local
+      # Android SDK just to write four files).
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Ensure Gradle wrapper
+        run: |
+          set -euo pipefail
+          properties="android/gradle/wrapper/gradle-wrapper.properties"
+          pinned="$(sed -n 's#.*gradle-\([0-9][0-9.]*\)-\(all\|bin\)\.zip.*#\1#p' "$properties")"
+          if [ -z "$pinned" ]; then
+            echo "::error::cannot read a Gradle version from $properties"
+            exit 1
+          fi
+          if [ "$pinned" != "$GRADLE_VERSION" ]; then
+            echo "::error::$properties pins Gradle $pinned but the workflow installs $GRADLE_VERSION"
+            exit 1
+          fi
+          if [ -s android/gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "gradle-wrapper.jar is present in the checkout."
+            exit 0
+          fi
+          echo "gradle-wrapper.jar is missing — regenerating it with 'gradle wrapper'."
+          scratch="$(mktemp -d)"
+          touch "$scratch/settings.gradle"
+          (cd "$scratch" && gradle wrapper --gradle-version "$pinned" --distribution-type all)
+          cp "$scratch/gradlew" "$scratch/gradlew.bat" android/
+          cp "$scratch/gradle/wrapper/gradle-wrapper.jar" android/gradle/wrapper/
+          rm -rf "$scratch"
+          chmod +x android/gradlew
+
+      - name: Verify Android wrapper checkout safety
+        run: |
+          set -euo pipefail
+          if [ ! -x android/gradlew ]; then
+            echo "::error::android/gradlew is not executable — it must be committed with mode 100755"
+            exit 1
+          fi
+          if [ ! -s android/gradle/wrapper/gradle-wrapper.jar ]; then
+            echo "::error::android/gradle/wrapper/gradle-wrapper.jar is missing or empty"
+            exit 1
+          fi
+          if [ ! -s android/gradle/wrapper/gradle-wrapper.properties ]; then
+            echo "::error::android/gradle/wrapper/gradle-wrapper.properties is missing or empty"
+            exit 1
+          fi
+          echo "Gradle wrapper: $(ls -l android/gradlew | cut -d' ' -f1)"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Print tool versions
+        run: |
+          flutter --version
+          dart --version
+          java -version
+
+      # --enforce-lockfile makes resolution fail if pubspec.lock would have to
+      # change (missing entry, stale version or SDK constraint) instead of
+      # silently rewriting it. Verified consistent with pubspec.yaml: the flag
+      # only turns accidental drift into a build failure.
+      - name: Resolve dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build debug APK
+        run: flutter build apk --debug

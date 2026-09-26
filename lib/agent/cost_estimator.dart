@@ -1,4 +1,7 @@
 // lib/agent/cost_estimator.dart — A9 (FULL — live model list + fallback array + rotation handling)
+// The cap identifiers mirror the budget table in docs/ verbatim, so the
+// lowerCamelCase constant rule is not applicable to this file.
+// ignore_for_file: constant_identifier_names
 const int OPENROUTER_FREE_RPM_CAP = 20; // fixed regardless of funding
 const int OPENROUTER_FREE_DAILY_CAP_UNFUNDED = 50;
 const int OPENROUTER_FREE_DAILY_CAP_FUNDED = 1000;
@@ -38,10 +41,9 @@ class FreeModelCache {
 class CostEstimator {
   static CostEstimate estimate({required bool funded, required int usedToday}) {
     final cap = funded ? OPENROUTER_FREE_DAILY_CAP_FUNDED : OPENROUTER_FREE_DAILY_CAP_UNFUNDED;
-    final remaining = cap - usedToday;
     // Fallback array: 2-3 free model IDs per A9 revised (not a single hardcoded ID)
     final fallbackIds = ['openrouter/free-model-a', 'openrouter/free-model-b', 'openrouter/free-model-c'];
-    return CostEstimate(20, usedToday, cap, fallbackIds);
+    return CostEstimate(OPENROUTER_FREE_RPM_CAP, usedToday, cap, fallbackIds);
   }
 
   // Support fallback array routing: tries model A, then B, then C on 429 / rotation

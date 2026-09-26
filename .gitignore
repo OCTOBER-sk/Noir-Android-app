@@ -9,11 +9,12 @@ build/
 *.log
 
 # Android
+# The Gradle wrapper is required to build: gradlew, gradlew.bat,
+# gradle/wrapper/gradle-wrapper.jar and gradle-wrapper.properties must all be
+# committable. Only build output and machine-local config stay ignored.
 android/.gradle/
 android/build/
 android/app/build/
-android/gradle/wrapper/gradle-wrapper.jar
-android/gradlew.bat
 android/local.properties
 android/.idea/
 
@@ -39,6 +40,3 @@ ios/Pods/
 ios/.symlinks/
 ios/Plugins/
 ios/Runner.xcworkspace/
-
-# Unit test log files, screenshots and temp files.
-test/

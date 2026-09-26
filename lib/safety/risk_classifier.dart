@@ -1,8 +1,9 @@
 // lib/safety/risk_classifier.dart — A6 (RiskClassifier — REAL implementation)
 // Classifies proposed ToolCall into tier 0-3 based on content, screen input, and action type.
 
-import 'policy_engine.dart';
-
+// Risk tier names are the V2.2 A6 identifiers, so the lowerCamelCase constant
+// rule does not apply to this file.
+// ignore_for_file: constant_identifier_names
 enum RiskTier { SAFE, STANDARD, SENSITIVE, HIGH_RISK }
 
 class RiskClassifier {

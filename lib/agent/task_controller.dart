@@ -1,10 +1,10 @@
 // lib/agent/task_controller.dart — A5 (TaskController — REAL implementation)
-// Full state machine: idle/planning/awaiting_confirmation/executing/recovering/paused/completed/failed/cancelled
+// Full state machine: idle/planning/awaitingConfirmation/executing/recovering/paused/completed/failed/cancelled
 // Wired to NoirUiEvent (lib/core/ui_state_contract.dart) for D2/D3 real-time updates.
 
 import '../core/ui_state_contract.dart';
 
-enum TaskState { idle, planning, awaiting_confirmation, executing, recovering, paused, completed, failed, cancelled }
+export '../core/ui_state_contract.dart' show TaskState;
 
 class TaskController {
   final String taskId;
@@ -28,5 +28,5 @@ class TaskController {
 
   bool isTerminal() => _state == TaskState.completed || _state == TaskState.failed || _state == TaskState.cancelled;
 
-  bool requiresConfirmation() => _state == TaskState.awaiting_confirmation;
+  bool requiresConfirmation() => _state == TaskState.awaitingConfirmation;
 }

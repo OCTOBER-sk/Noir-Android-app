@@ -1,10 +1,12 @@
 // lib/core/ui_state_contract.dart — V2.3 Section 3 (Backend <-> Frontend contract)
 // Every UI-visible state MUST originate from one of these — no ad-hoc UI state.
-sealed class NoirUiEvent {}
+sealed class NoirUiEvent {
+  const NoirUiEvent();
+}
 
 // Maps 1:1 to TaskController core states (A5)
 class TaskStateChanged extends NoirUiEvent {
-  final TaskState state; // idle | planning | awaiting_confirmation | executing | recovering | paused | completed | failed | cancelled
+  final TaskState state; // idle | planning | awaitingConfirmation | executing | recovering | paused | completed | failed | cancelled
   TaskStateChanged(this.state);
 }
 
@@ -30,15 +32,28 @@ class ActionCompletedWithUndoWindow extends NoirUiEvent {
   ActionCompletedWithUndoWindow(this.actionDescription, this.reversible, this.window);
 }
 
-// Backend states mapped
-class TaskState {
-  static const String idle = 'idle';
-  static const String planning = 'planning';
-  static const String awaitingConfirmation = 'awaiting_confirmation';
-  static const String executing = 'executing';
-  static const String recovering = 'recovering';
-  static const String paused = 'paused';
-  static const String completed = 'completed';
-  static const String failed = 'failed';
-  static const String cancelled = 'cancelled';
+class UserMessageSubmitted extends NoirUiEvent {
+  final String messageId;
+  final String text;
+  const UserMessageSubmitted(this.messageId, this.text);
 }
+
+class AssistantMessageStarted extends NoirUiEvent {
+  final String messageId;
+  const AssistantMessageStarted(this.messageId);
+}
+
+class AssistantDeltaReceived extends NoirUiEvent {
+  final String messageId;
+  final String delta;
+  final String aggregatedText;
+  const AssistantDeltaReceived(this.messageId, this.delta, this.aggregatedText);
+}
+
+class AssistantStreamStopped extends NoirUiEvent {
+  final String messageId;
+  const AssistantStreamStopped(this.messageId);
+}
+
+// Backend states mapped
+enum TaskState { idle, planning, awaitingConfirmation, executing, recovering, paused, completed, failed, cancelled }

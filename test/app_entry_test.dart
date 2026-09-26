@@ -17,12 +17,37 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:noir_android_app/automations/automations.dart';
 import 'package:noir_android_app/core/composition_root.dart';
 import 'package:noir_android_app/main.dart';
 import 'package:noir_android_app/platform/accessibility_status.dart';
 import 'package:noir_android_app/platform/native_bridge.dart';
 
 const MethodChannel _channel = MethodChannel('com.noir.android/channel');
+
+/// A ticker the test fires by hand.
+///
+/// The entry wiring is about *when* the tick is armed, not about a cadence, and
+/// a widget test must not wait for a real thirty-second `Timer.periodic` to
+/// find out. `cancelCount` is how "leaving the foreground cancels the timer" is
+/// observed rather than assumed.
+class _HandTicker implements AutomationTicker {
+  void Function()? lastTick;
+  int startCount = 0;
+  int cancelCount = 0;
+
+  @override
+  void start(Duration every, void Function() tick) {
+    startCount += 1;
+    lastTick = tick;
+  }
+
+  @override
+  void cancel() {
+    cancelCount += 1;
+    lastTick = null;
+  }
+}
 
 Map<String, dynamic> _connectedStatus() => <String, dynamic>{
   kWireServiceConnected: true,
@@ -212,6 +237,94 @@ void main() {
     // The store opened and is empty, which is a different statement from
     // "MCP is unavailable" and from "unknown".
     expect(find.textContaining('No MCP server is configured'), findsOneWidget);
+    await teardown(tester, app);
+  });
+
+  // A graph with no writable record directory, so the tick has something real
+  // to report and nothing to wait for: the pass it performs reads no files, so
+  // it completes inside the test's fake-async zone — where, as the helpers above
+  // say, real file IO would never complete at all.
+  Future<NoirComposition> graphWithoutStorage(
+    WidgetTester tester, {
+    required AutomationTicker ticker,
+  }) async {
+    final File blocker = File('${workspace.path}/blocker')
+      ..writeAsStringSync('not a directory');
+    return (await tester.runAsync(
+      () => NoirComposition.open(
+        dataRootCandidates: <Directory>[Directory(blocker.path)],
+        automationTicker: ticker,
+      ),
+    ))!;
+  }
+
+  testWidgets('the tick is armed with the app and disarmed when it is not', (
+    tester,
+  ) async {
+    final _HandTicker ticker = _HandTicker();
+    final NoirComposition app = await graphWithoutStorage(
+      tester,
+      ticker: ticker,
+    );
+
+    await tester.pumpWidget(NoirApp(composition: app));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    // The app is up, so the tick is armed — and it has already offered what was
+    // due, rather than waiting a whole interval to discover it.
+    expect(app.automationScheduler.isRunning, isTrue);
+    expect(ticker.startCount, 1);
+    expect(app.automationScheduler.passesRun, 1);
+    // The graph has nowhere to keep a job, so the pass says that. What matters
+    // here is that the tick really called the graph's own dispatch: the answer
+    // is the graph's, produced by a pass nobody triggered by hand.
+    expect(app.automationScheduler.lastPass, isA<AutomationPassUnavailable>());
+    expect(
+      (app.automationScheduler.lastPass! as AutomationPassUnavailable).reason,
+      contains('durable'),
+    );
+
+    // The handle a real periodic timer would still be holding.
+    final void Function() held = ticker.lastTick!;
+
+    // Leaving the foreground cancels the timer, and a callback that arrives
+    // anyway does nothing: no job is offered to a user who is not looking.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(app.automationScheduler.isRunning, isFalse);
+    expect(ticker.cancelCount, 1);
+    held();
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(
+      app.automationScheduler.passesRun,
+      1,
+      reason: 'a tick that lands while the app is not in front is not a pass',
+    );
+
+    // Coming back re-arms it, and offers what is due as soon as it is back.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(app.automationScheduler.isRunning, isTrue);
+    expect(ticker.startCount, 2);
+    expect(
+      app.automationScheduler.passesRun,
+      2,
+      reason: 'a job that came due while the app was away is offered on return',
+    );
+
+    // The splash handing over to the Command Centre is not the app leaving, so
+    // the tick survives the handover.
+    await tester.pump(const Duration(milliseconds: 1700));
+    await settle(tester);
+    expect(find.text('NOIr'), findsOneWidget);
+    expect(
+      app.automationScheduler.isRunning,
+      isTrue,
+      reason: 'navigating inside the app does not stop the scheduler',
+    );
+    expect(ticker.cancelCount, 1, reason: 'and the handover cancelled nothing');
+
     await teardown(tester, app);
   });
 }

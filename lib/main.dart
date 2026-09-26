@@ -34,6 +34,18 @@
 // `CommandCentreScreen` and a `UsageTracker` are still what the app runs, and
 // they are the very same instances the rest of the graph writes to.
 //
+// What `_NoirAppState` owns, and it is not a startup step: the foreground tick
+// that dispatches scheduled automations. A scheduled job could be created, was
+// durable, was listed in the Skill Manager — and nothing ever asked what was
+// due, because the only caller of the graph's dispatch was a test. So the app
+// arms the tick when it mounts and disarms it whenever the lifecycle says the
+// app is no longer in front, which is the strongest promise this build can
+// make: there is no `AlarmManager`, no `WorkManager` and no background service
+// here, so a job whose time came while the app was closed runs when the app next
+// opens, and never while the process is dead. Every job it offers still goes
+// through the same policy gate and the same confirmation a tap needs, because
+// the tick's one seam is the graph's own `runDueAutomations`.
+//
 // What the splash now says as well: whether the graph may be called ready.
 // `NoirComposition.open` records every step it took, and the readiness line is
 // computed from that record rather than asserted beside it — so a startup whose
@@ -81,7 +93,7 @@ class NoirApp extends StatefulWidget {
   State<NoirApp> createState() => _NoirAppState();
 }
 
-class _NoirAppState extends State<NoirApp> {
+class _NoirAppState extends State<NoirApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -90,11 +102,37 @@ class _NoirAppState extends State<NoirApp> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(widget.composition.warmUp());
     });
+    // The tick that dispatches due automations lives for as long as the app is
+    // in front of the user, and this is the only place that knows when that is.
+    // Mounting the app *is* the app coming up, so the tick is armed here; the
+    // observer below disarms it on the way out and re-arms it on the way back.
+    // That is the whole of the promise, because this build has no platform alarm
+    // and no background service: a job is offered while the app is up, and when
+    // the app comes up again after being closed.
+    WidgetsBinding.instance.addObserver(this);
+    widget.composition.startAutomationScheduler();
     widget.composition.addListener(_onCompositionChanged);
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        widget.composition.startAutomationScheduler();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        widget.composition.stopAutomationScheduler();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // The tick is stopped with the app, and again by the graph's own disposal
+    // below. Neither is a race: a stopped scheduler ignores a held callback.
+    widget.composition.stopAutomationScheduler();
     widget.composition.removeListener(_onCompositionChanged);
     unawaited(widget.composition.dispose());
     super.dispose();

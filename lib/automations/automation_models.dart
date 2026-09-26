@@ -69,6 +69,9 @@ class AutomationError implements Exception {
   /// A concurrency bound below one.
   static const String invalidConcurrency = 'INVALID_CONCURRENCY';
 
+  /// A count of dispatched work that could not have happened.
+  static const String invalidRunCount = 'INVALID_RUN_COUNT';
+
   /// An execution-log retention bound below one.
   static const String invalidLogRetention = 'INVALID_LOG_RETENTION';
 

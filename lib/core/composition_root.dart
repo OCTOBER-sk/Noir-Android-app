@@ -24,7 +24,8 @@
 //   automations AutomationService over the durable automations collection, the
 //             single PolicyEngine, and an executor that goes through
 //             runAutomation — so a scheduled job is gated per run exactly like a
-//             manual one
+//             manual one — driven by the foreground tick this root owns, whose
+//             only seam is runDueAutomations
 //   safety    RiskClassifier, PolicyEngine, Sanitizer, ConsentGate,
 //             CountdownUndoWindow, ScreenPlanner, NativeGestureExecutor,
 //             SanitizingRecoveryEngine, AgentRuntimePipeline
@@ -511,7 +512,17 @@ class NoirComposition extends ChangeNotifier {
     required this.provider,
     required this.jobs,
     required this.journal,
+    AutomationTicker? automationTicker,
   }) {
+    // The tick is built here rather than passed in, because what it calls is
+    // this graph's own dispatch seam and nothing else. `open` injects the ticker
+    // so a test can drive the cadence by hand; the shipped app passes nothing
+    // and gets the real thirty-second `Timer.periodic`.
+    automationScheduler = AutomationScheduler(
+      due: _offerDueJobs,
+      clock: clock,
+      ticker: automationTicker,
+    );
     for (final StartupFault fault in startupFaults) {
       _faults[fault.subsystem] = fault;
     }
@@ -596,6 +607,15 @@ class NoirComposition extends ChangeNotifier {
   /// The durable transcript, or null when there is no store to hold one.
   ConversationRepository? get conversations => journal?.repository;
 
+  /// The tick that dispatches what is due, owned by this graph and disposed with
+  /// it.
+  ///
+  /// Not armed by [open]: the graph is built before there is a user in front of
+  /// it, and the tick's honest promise is "while the app is in front". The app
+  /// entry arms it through [startAutomationScheduler] and disarms it through
+  /// [stopAutomationScheduler].
+  late final AutomationScheduler automationScheduler;
+
   CatalogState _catalog = const CatalogIdle();
   bool _warming = false;
   bool _disposed = false;
@@ -611,6 +631,7 @@ class NoirComposition extends ChangeNotifier {
   final StreamController<SafetyEventState> _safetyEvents =
       StreamController<SafetyEventState>.broadcast();
   StreamSubscription<NoirUiEvent>? _taskSubscription;
+  StreamSubscription<AutomationPass>? _schedulerSubscription;
   int _safetySequence = 0;
   int _timelineSequence = 0;
 
@@ -674,6 +695,11 @@ class NoirComposition extends ChangeNotifier {
   /// The model catalog is *not* fetched here. A catalog read is a network call
   /// to a provider the user configured, and blocking first paint on it would be
   /// the wrong trade; call [warmUp] for that, or await it in a splash.
+  ///
+  /// [automationTicker] is a test seam, alongside [providerTransport] and
+  /// [mcpTransportFactory]: the shipped app passes nothing and the graph gets a
+  /// real `Timer.periodic`, which [startAutomationScheduler] arms when the app
+  /// comes up.
   static Future<NoirComposition> open({
     List<Directory>? dataRootCandidates,
     NativeBridge? bridge,
@@ -681,6 +707,7 @@ class NoirComposition extends ChangeNotifier {
     Duration consentTimeout = kDefaultConsentTimeout,
     ProviderTransport? providerTransport,
     McpTransportFactory? mcpTransportFactory,
+    AutomationTicker? automationTicker,
   }) async {
     final Clock clock = SystemClock();
     final DateTime Function() stamp = now ?? clock.now;
@@ -1065,10 +1092,15 @@ class NoirComposition extends ChangeNotifier {
               conversation: conversation,
               repository: layer.conversations,
             ),
+      automationTicker: automationTicker,
     );
     composition._taskSubscription = taskRun.events.listen(
       composition._onTaskEvent,
     );
+    // A tick that cannot do its work is reported on the safety log, so the
+    // reason is in the graph's own record rather than only in a test's.
+    composition._schedulerSubscription = composition.automationScheduler.passes
+        .listen(composition._onSchedulerPass);
     // The transcript is restored before anything can append to it, so the
     // durable record and the controller end up holding the same conversation
     // rather than the record gaining a second thread.
@@ -1416,11 +1448,12 @@ class NoirComposition extends ChangeNotifier {
 
   /// Offers every due scheduled job to the gate and runs what it approves.
   ///
-  /// The app-facing seam for the scheduler. When the pass happens is the
-  /// caller's decision — this build has no platform alarm, so the tick has to
-  /// come from whatever owns one — and no job reaches the screen without the
-  /// same confirmation a manual run needs, so a background pass can do no more
-  /// than a foreground one.
+  /// One call of the tick: what this method does is unchanged, but it is no
+  /// longer a method only a test calls. [automationScheduler] calls it on an
+  /// interval while the app is in front, and every run it produces goes through
+  /// the same policy gate and the same human confirmation a manual run needs, so
+  /// a scheduled job gets no privilege the button in the Operations Sheet would
+  /// not.
   ///
   /// [AutomationDispatchUnavailable] when the subsystem is unavailable, and
   /// never a fabricated empty result: "nothing was due" and "there is no
@@ -1438,6 +1471,81 @@ class NoirComposition extends ChangeNotifier {
       AutomationsUnavailable(:final String reason) =>
         AutomationDispatchUnavailable(reason),
     };
+  }
+
+  /// Arms the tick that dispatches due automations.
+  ///
+  /// The app-facing half of the scheduler, and the whole of the foreground
+  /// promise this build can make. There is no platform alarm here — no
+  /// `AlarmManager`, no `WorkManager`, no background service — so the only thing
+  /// that can ask "what is due?" is a running app. The caller is `NoirApp`,
+  /// which arms the tick when the app comes up and disarms it when the app
+  /// leaves, so a job whose time came while the app was closed runs when the app
+  /// next opens, and never while the process is dead. Nothing about that is
+  /// implied beyond it: the guarantee is "while the app is in front", not
+  /// "at the instant it was due".
+  void startAutomationScheduler() => automationScheduler.start();
+
+  /// Disarms the tick and cancels its timer. A pass already in flight is not
+  /// cancelled, because it may be waiting on a human and withdrawing a consent
+  /// gate is not a decision.
+  void stopAutomationScheduler() => automationScheduler.stop();
+
+  /// One tick, answered in the scheduler's own typed vocabulary.
+  ///
+  /// Late-bound to [runDueAutomations] on purpose, and there is no second
+  /// dispatch path: the tick goes through the same gate, the same consent and
+  /// the same durable records a manual run and a direct caller use. The mapping
+  /// is total, so no answer can be lost — an unavailable subsystem stays
+  /// [AutomationPassUnavailable] rather than being flattened into a pass that
+  /// found nothing due.
+  Future<AutomationPass> _offerDueJobs() async {
+    final AutomationDispatch dispatch = await runDueAutomations();
+    return switch (dispatch) {
+      AutomationDispatched(:final List<AutomationRun> runs) =>
+        AutomationPassCompleted(at: clock.now(), runCount: runs.length),
+      AutomationDispatchUnavailable(:final String reason) =>
+        AutomationPassUnavailable(at: clock.now(), reason: reason),
+    };
+  }
+
+  /// Reports a tick that could not do its work.
+  ///
+  /// A pass that ran is already accounted for: the runs themselves are durable
+  /// records, and a run the gate denied or a user refused says so on the job the
+  /// Skill Manager lists. A pass that *failed*, or that had no scheduler to run
+  /// with, is a different kind of absence and is recorded here with the real
+  /// reason rather than left looking like a night when nothing happened.
+  ///
+  /// Stated plainly, because the alternative is a comment that implies more than
+  /// this build can do: the Safety Center is constructed without this log — see
+  /// `SafetyCenterScreen` at lib/ui/command_centre_screen.dart:418 — so today it
+  /// is a record the graph keeps and [safetyEvents] publishes, not a line the
+  /// user reads on a screen. What the user can see is the job's own `lastError`
+  /// in the Skill Manager, and, when there is no store at all, the startup fault
+  /// on the splash.
+  void _onSchedulerPass(AutomationPass pass) {
+    switch (pass) {
+      case AutomationPassFailed(:final String reason):
+        _logSafety(
+          summary: 'The scheduled-automation tick failed',
+          kind: SafetyEventKind.policy,
+          outcome: SafetyEventOutcome.blocked,
+          detail: reason,
+        );
+      case AutomationPassUnavailable(:final String reason):
+        _logSafety(
+          summary: 'No scheduled automation could be offered',
+          kind: SafetyEventKind.policy,
+          outcome: SafetyEventOutcome.blocked,
+          detail: reason,
+        );
+      case AutomationPassCompleted():
+      case AutomationPassSkipped():
+        // A pass that ran is in the job's own record, and a tick that was
+        // skipped because another was still going is not a fault at all.
+        break;
+    }
   }
 
   /// The scheduled jobs the durable repository holds, oldest id first.
@@ -1650,6 +1758,12 @@ class NoirComposition extends ChangeNotifier {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    // The tick goes first, before anything it can reach starts closing: after
+    // this a callback the platform timer kept does nothing, and no pass can
+    // start against a graph that is on its way out. A pass already in flight is
+    // not cancelled — it may be waiting on a human, and withdrawing a consent
+    // gate is not a decision.
+    automationScheduler.stop();
     gate.revokeAll();
     undoWindow.cancel();
     // A turn in flight is holding a provider stream and may still be writing
@@ -1677,6 +1791,12 @@ class NoirComposition extends ChangeNotifier {
     }
     await _taskSubscription?.cancel();
     _taskSubscription = null;
+    await _schedulerSubscription?.cancel();
+    _schedulerSubscription = null;
+    // Last, so nothing is still listening to the tick as it closes: the pass
+    // stream is closed without awaiting its done future, for the same reason the
+    // broadcast controllers below are.
+    await automationScheduler.dispose();
     await gate.dispose();
     await undoWindow.dispose();
     await taskRun.close();

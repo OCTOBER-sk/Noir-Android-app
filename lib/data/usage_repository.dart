@@ -25,6 +25,8 @@ class UsageRecord extends DataRecord {
     required this.occurredAt,
     required super.createdAt,
     required super.updatedAt,
+    this.costUsd,
+    this.source,
   }) {
     if (provider.trim().isEmpty) {
       throw const InvalidDataError('a usage record needs a provider');
@@ -56,6 +58,17 @@ class UsageRecord extends DataRecord {
   /// When the request happened, in UTC. Buckets by UTC day.
   final DateTime occurredAt;
 
+  /// What the request cost in USD, or null when the model's price was unknown.
+  ///
+  /// Optional so a record written before this field, or written without a
+  /// discovered price, is still readable. Null means "not priced", which is a
+  /// different claim from zero.
+  final double? costUsd;
+
+  /// `UsageSource.name` of the `lib/providers` record this was written from,
+  /// or null when the record did not come from one.
+  final String? source;
+
   int get totalTokens => promptTokens + completionTokens;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -64,6 +77,8 @@ class UsageRecord extends DataRecord {
     'promptTokens': promptTokens,
     'completionTokens': completionTokens,
     'funded': funded,
+    'costUsd': costUsd,
+    'source': source,
     'occurredAt': occurredAt.toUtc().toIso8601String(),
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
@@ -192,6 +207,8 @@ class UsageRecordCodec extends RecordCodec<UsageRecord> {
         occurredAt: occurredAt,
         createdAt: createdAt,
         updatedAt: updatedAt,
+        costUsd: _optionalDouble(json, 'costUsd'),
+        source: optionalString(json, 'source'),
       );
     } on InvalidDataError catch (error) {
       throw MalformedRecordError(
@@ -202,6 +219,18 @@ class UsageRecordCodec extends RecordCodec<UsageRecord> {
         cause: error,
       );
     }
+  }
+
+  /// A price that is absent, unparsable, negative or not finite is reported as
+  /// unknown rather than as a number. A usage record must never invent money.
+  static double? _optionalDouble(Map<String, Object?> json, String key) {
+    final Object? raw = json[key];
+    if (raw is num) return raw.isFinite && raw >= 0 ? raw.toDouble() : null;
+    if (raw is String) {
+      final double? parsed = double.tryParse(raw.trim());
+      return parsed != null && parsed.isFinite && parsed >= 0 ? parsed : null;
+    }
+    return null;
   }
 }
 

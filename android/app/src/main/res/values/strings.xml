@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Noir</string>
-    <string name="accessibility_service_description">Noir Agent Automation Service &#8212; feeds screen content to A6a Sanitizer with full node metadata (bounds, alpha, zOrder)</string>
+    <!--
+      Play requires the user-facing disclosure to say what the service collects
+      and when it acts. The wording matches the implemented policy exactly:
+      reading only while the user has the app in front of them, only on an
+      explicit request, credentials redacted, and nothing without a confirmed
+      action.
+    -->
+    <string name="accessibility_service_description">Lets Noir carry out actions you ask for on this device. Noir reads the screen only while you are using the app and only after you ask it to; credentials in screen text are redacted before anything is sent; and a tap is only performed after you confirm it. Noir is not an assistive technology and does not collect anything on its own.</string>
 </resources>

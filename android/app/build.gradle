@@ -40,4 +40,11 @@ flutter {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.2.20"
+
+    // Pure-JVM unit tests for the accessibility bridge helpers
+    // (redaction, payload cap, event buffer bounds, consent token, gesture
+    // refusal). Deliberately plain JUnit: the helpers under test import no
+    // android.* and touch no framework class, so `testDebugUnitTest` needs
+    // neither a device nor Robolectric.
+    testImplementation "junit:junit:4.13.2"
 }

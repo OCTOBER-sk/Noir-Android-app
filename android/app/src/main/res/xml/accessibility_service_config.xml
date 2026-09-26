@@ -5,8 +5,16 @@
   canPerformGestures="true" is REQUIRED: without it
   AccessibilityService.dispatchGesture() always returns false and every
   MainActivity.executeGesture() call fails with GESTURE_DISPATCH_REJECTED.
+  The platform does not assume this — it reads
+  AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES at dispatch time and
+  fails closed when the bit is absent.
   canRetrieveWindowContent="true" is required for rootInActiveWindow.
   flagReportViewIds makes viewIdResourceName meaningful for node identity.
+
+  isAccessibilityTool="false" states the truth for Google Play: this service
+  automates the user's own device for an app-driven workflow, it is not an
+  assistive technology, and the Play policy for that class of service requires
+  the declaration to be explicit rather than defaulted.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged|typeWindowsChanged"
@@ -15,4 +23,5 @@
     android:canPerformGestures="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/accessibility_service_description"
+    android:isAccessibilityTool="false"
     android:notificationTimeout="100" />

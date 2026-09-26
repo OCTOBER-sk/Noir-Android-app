@@ -33,6 +33,12 @@
 // The pre-existing entry path is unchanged: a `ConversationController`, a
 // `CommandCentreScreen` and a `UsageTracker` are still what the app runs, and
 // they are the very same instances the rest of the graph writes to.
+//
+// What the splash now says as well: whether the graph may be called ready.
+// `NoirComposition.open` records every step it took, and the readiness line is
+// computed from that record rather than asserted beside it — so a startup whose
+// persistence failed says "not ready" and names the subsystem, instead of
+// printing a reassuring line over a graph that cannot keep a conversation.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -52,6 +58,13 @@ void main() {
 }
 
 /// Builds the graph and runs the app on it.
+///
+/// Deterministic by construction: [NoirComposition.open] awaits persistence,
+/// memory, prompts, usage, the provider runtime, the safety stack, MCP, the
+/// conversation and the transcript restore in that fixed order, and the app is
+/// only handed to `runApp` once every one of them has either succeeded or become
+/// a typed state. Nothing is retried behind the user's back and nothing is
+/// skipped, so two launches over the same directory build the same graph.
 Future<void> runNoir() async {
   final NoirComposition composition = await NoirComposition.open();
   runApp(NoirApp(composition: composition));
@@ -182,54 +195,113 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     final NoirComposition composition = widget.composition;
+    final StartupState startup = composition.startup;
     return Scaffold(
       backgroundColor: NoirColors.pureBlack,
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Image.asset(
-              'assets/noir_logo.png',
-              width: 200,
-              height: 200,
-              filterQuality: FilterQuality.high,
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'Noir',
-              style: TextStyle(
-                color: NoirColors.textSecondary,
-                fontSize: 28,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 4,
+        // Scrollable, because the honest answer is sometimes longer than the
+        // happy one: a startup with several faults to report must not overflow
+        // and hide the reasons it is reporting.
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Image.asset(
+                'assets/noir_logo.png',
+                width: 200,
+                height: 200,
+                filterQuality: FilterQuality.high,
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'On-device automation',
-              style: TextStyle(
-                color: NoirColors.textMuted,
-                fontSize: 13,
-                letterSpacing: 1,
+              const SizedBox(height: 24),
+              const Text(
+                'Noir',
+                style: TextStyle(
+                  color: NoirColors.textSecondary,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 4,
+                ),
               ),
-            ),
-            const SizedBox(height: 40),
-            // The one thing worth saying before the app opens: whether this
-            // build has somewhere to keep what the user gives it.
-            Text(
-              _startupLine(composition),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: NoirColors.textMuted,
-                fontSize: 11,
-                letterSpacing: 0.2,
-                height: 1.5,
+              const SizedBox(height: 8),
+              const Text(
+                'On-device automation',
+                style: TextStyle(
+                  color: NoirColors.textMuted,
+                  fontSize: 13,
+                  letterSpacing: 1,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 40),
+              // Whether the graph may be called ready, and exactly which subsystem
+              // says no. Rebuilt when the graph learns something new — a catalog
+              // that could not be read, for instance, arrives after this screen is
+              // already up.
+              Text(
+                _readinessLine(startup),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: startup.isReady
+                      ? NoirColors.textSecondary
+                      : NoirColors.textMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(height: 10),
+              // The one thing worth saying before the app opens: whether this
+              // build has somewhere to keep what the user gives it.
+              Text(
+                _startupLine(composition),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: NoirColors.textMuted,
+                  fontSize: 11,
+                  letterSpacing: 0.2,
+                  height: 1.5,
+                ),
+              ),
+              // One line per fault, so "not ready" is never a bare verdict the user
+              // has to take on trust.
+              for (final StartupFault fault in startup.faults)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6, left: 32, right: 32),
+                  child: Text(
+                    '${fault.subsystem}: ${fault.reason}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: NoirColors.textMuted,
+                      fontSize: 11,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  /// Whether the app may claim to be ready.
+  ///
+  /// Never a bare "ready": with a required subsystem down the line says so, and
+  /// the faults below it name the subsystem and the reason.
+  static String _readinessLine(StartupState startup) {
+    if (startup is StartupFailed) {
+      return startup.faults.any(
+            (StartupFault fault) =>
+                fault.subsystem == kRequiredStartupSubsystem,
+          )
+          ? 'NOT READY — NO RECORD STORE'
+          : 'NOT READY';
+    }
+    if (startup is StartupDegraded) {
+      return 'READY — ${startup.faults.length} SUBSYSTEM(S) UNAVAILABLE';
+    }
+    return 'READY';
   }
 
   /// What the graph managed to build, in one line, or in three when the honest

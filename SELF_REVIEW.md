@@ -24,7 +24,7 @@
 - `agent_runtime.dart`: `RiskClassifier`/`ReflectionCritic` skeleton only; undo window state only; no real countdown
 - `screen_content_sanitizer.dart`: operated on String only, not full node metadata (A6a)
 - `cost_estimator.dart`: static fallback array; no live OpenRouter fetch (A9)
-- `mcp_adapter.dart`: skeleton only (B2)
+- `mcp_adapter.dart`: skeleton only (B2) — pre-fix state; now a full adapter, see §3
 - `model_router.dart`: static array; no live refresh (B3)
 - `recovery_engine.dart`: minimal (A4)
 - `command_centre_screen.dart`: skeleton widget; no real `Stream` consumer (D2); `UndoToast` (D15) missing

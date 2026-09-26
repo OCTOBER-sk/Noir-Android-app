@@ -183,9 +183,7 @@ void main() {
       await tapAction(tester, Icons.arrow_upward_rounded);
       expect(find.text('ping'), findsOneWidget);
 
-      await tester.pumpWidget(
-        const MaterialApp(home: SizedBox.shrink()),
-      );
+      await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
 
       expect(tester.takeException(), isNull);
     });
@@ -240,9 +238,7 @@ void main() {
       expect(find.text('from the new controller'), findsOneWidget);
       expect(find.text('ping'), findsNothing);
 
-      await tester.pumpWidget(
-        const MaterialApp(home: SizedBox.shrink()),
-      );
+      await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
 
       // An injected controller is never closed by the screen, on swap or on
       // unmount: the test's own teardown owns it.

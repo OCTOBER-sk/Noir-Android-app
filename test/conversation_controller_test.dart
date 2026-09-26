@@ -24,10 +24,7 @@ void main() {
       final controller = ConversationController();
       addTearDown(controller.close);
 
-      expect(
-        () => controller.submitUserMessage(' \t\n'),
-        throwsArgumentError,
-      );
+      expect(() => controller.submitUserMessage(' \t\n'), throwsArgumentError);
       expect(controller.messages, isEmpty);
     });
 
@@ -42,7 +39,10 @@ void main() {
 
       final secondMessageId = controller.beginAssistantMessage();
       expect(controller.appendAssistantDelta(secondMessageId, 'New'), isTrue);
-      expect(controller.appendAssistantDelta(secondMessageId, ' reply'), isTrue);
+      expect(
+        controller.appendAssistantDelta(secondMessageId, ' reply'),
+        isTrue,
+      );
 
       expect(controller.messageById(firstMessageId)!.text, 'Hello');
       expect(controller.messageById(secondMessageId)!.text, 'New reply');
@@ -77,10 +77,7 @@ void main() {
       expect(controller.messageById(messageId)!.text, 'partial');
       expect(events, hasLength(3));
       expect(events.last, isA<AssistantStreamStopped>());
-      expect(
-        (events.last as AssistantStreamStopped).messageId,
-        messageId,
-      );
+      expect((events.last as AssistantStreamStopped).messageId, messageId);
 
       await subscription.cancel();
     });
@@ -105,10 +102,7 @@ void main() {
         isA<AssistantDeltaReceived>(),
         isA<AssistantStreamStopped>(),
       ]);
-      expect(
-        (events[0] as UserMessageSubmitted).messageId,
-        userMessage.id,
-      );
+      expect((events[0] as UserMessageSubmitted).messageId, userMessage.id);
       expect(
         (events[1] as AssistantMessageStarted).messageId,
         assistantMessageId,

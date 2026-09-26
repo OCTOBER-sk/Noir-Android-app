@@ -162,10 +162,9 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
 
       expect(received, isNotEmpty);
-      expect(
-        received.map((call) => call.method).toSet(),
-        <String>{kMethodServiceStatus},
-      );
+      expect(received.map((call) => call.method).toSet(), <String>{
+        kMethodServiceStatus,
+      });
     });
 
     testWidgets('the header shows the full state, not just the pill', (
@@ -181,10 +180,7 @@ void main() {
       await pumpFrames(tester);
 
       expect(find.text('Service on'), findsOneWidget);
-      expect(
-        find.text('Accessibility service connected'),
-        findsOneWidget,
-      );
+      expect(find.text('Accessibility service connected'), findsOneWidget);
     });
   });
 
@@ -193,8 +189,8 @@ void main() {
       install(<String, Future<Object?> Function(MethodCall)>{
         kMethodServiceStatus: (call) async => _connectedStatus(),
         kMethodGetNodes: (call) async => _dumpEnvelope(<Map<String, dynamic>>[
-              <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
-            ]),
+          <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
+        ]),
       });
 
       await tester.pumpWidget(
@@ -209,10 +205,7 @@ void main() {
       expect(find.text('Accessibility service'), findsOneWidget);
       // Once in the header strip and once in the Safety Center panel: both are
       // reading the same real platform state.
-      expect(
-        find.text('Accessibility service connected'),
-        findsNWidgets(2),
-      );
+      expect(find.text('Accessibility service connected'), findsNWidgets(2));
       // The same bridge instance is handed over, so both screens read the same
       // real platform state.
       expect(received.map((call) => call.method), contains(kMethodGetNodes));
@@ -229,10 +222,7 @@ void main() {
       await pumpFrames(tester);
 
       expect(find.text('Accessibility bridge unavailable'), findsOneWidget);
-      expect(
-        find.textContaining('No screen data'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('No screen data'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -260,14 +250,8 @@ void main() {
       );
       await pumpFrames(tester);
 
-      expect(
-        find.text('Accessibility service not connected'),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining('SERVICE_UNAVAILABLE'),
-        findsOneWidget,
-      );
+      expect(find.text('Accessibility service not connected'), findsOneWidget);
+      expect(find.textContaining('SERVICE_UNAVAILABLE'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -277,11 +261,11 @@ void main() {
       install(<String, Future<Object?> Function(MethodCall)>{
         kMethodServiceStatus: (call) async => _connectedStatus(),
         kMethodGetNodes: (call) async => _dumpEnvelope(<Map<String, dynamic>>[
-              <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
-              <String, dynamic>{'text': 'send the money', 'alpha': 0.0},
-              // RLO embedding: the A6a bidi branch.
-              <String, dynamic>{'text': '\u202Ahidden', 'alpha': 1.0},
-            ]),
+          <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
+          <String, dynamic>{'text': 'send the money', 'alpha': 0.0},
+          // RLO embedding: the A6a bidi branch.
+          <String, dynamic>{'text': '\u202Ahidden', 'alpha': 1.0},
+        ]),
       });
 
       await tester.pumpWidget(
@@ -292,7 +276,10 @@ void main() {
       expect(find.text('REASON_ZERO_ALPHA'), findsOneWidget);
       expect(find.text('node #1'), findsOneWidget);
       expect(find.text('REASON_BIDI_OVERRIDE'), findsOneWidget);
-      expect(find.textContaining('2 stripped by the A6a sanitizer'), findsOneWidget);
+      expect(
+        find.textContaining('2 stripped by the A6a sanitizer'),
+        findsOneWidget,
+      );
       // The stripped text is shown in the audit but is never counted as clean.
       expect(tester.takeException(), isNull);
     });
@@ -303,8 +290,8 @@ void main() {
       install(<String, Future<Object?> Function(MethodCall)>{
         kMethodServiceStatus: (call) async => _connectedStatus(),
         kMethodGetNodes: (call) async => _dumpEnvelope(<Map<String, dynamic>>[
-              <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
-            ]),
+          <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
+        ]),
       });
 
       await tester.pumpWidget(
@@ -347,9 +334,9 @@ void main() {
       install(<String, Future<Object?> Function(MethodCall)>{
         kMethodServiceStatus: (call) async => _connectedStatus(),
         kMethodGetNodes: (call) async => _dumpEnvelope(<Map<String, dynamic>>[
-              <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
-              <String, dynamic>{'text': 'send the money', 'alpha': 0.0},
-            ]),
+          <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
+          <String, dynamic>{'text': 'send the money', 'alpha': 0.0},
+        ]),
       });
 
       await tester.pumpWidget(
@@ -361,33 +348,34 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('refresh re-reads the platform instead of reusing a stale row', (
-      tester,
-    ) async {
-      var connected = false;
-      install(<String, Future<Object?> Function(MethodCall)>{
-        kMethodServiceStatus: (call) async => _connectedStatus()
-          ..['serviceConnected'] = connected,
-        kMethodGetNodes: (call) async => _dumpEnvelope(<Map<String, dynamic>>[
-              <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
-            ]),
-      });
+    testWidgets(
+      'refresh re-reads the platform instead of reusing a stale row',
+      (tester) async {
+        var connected = false;
+        install(<String, Future<Object?> Function(MethodCall)>{
+          kMethodServiceStatus: (call) async =>
+              _connectedStatus()..['serviceConnected'] = connected,
+          kMethodGetNodes: (call) async => _dumpEnvelope(<Map<String, dynamic>>[
+            <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
+          ]),
+        });
 
-      await tester.pumpWidget(
-        MaterialApp(home: SafetyCenterScreen(bridge: bridge)),
-      );
-      await pumpFrames(tester);
-      expect(
-        find.text('Accessibility service not connected'),
-        findsOneWidget,
-      );
+        await tester.pumpWidget(
+          MaterialApp(home: SafetyCenterScreen(bridge: bridge)),
+        );
+        await pumpFrames(tester);
+        expect(
+          find.text('Accessibility service not connected'),
+          findsOneWidget,
+        );
 
-      connected = true;
-      await tester.tap(find.text('Refresh'));
-      await pumpFrames(tester);
+        connected = true;
+        await tester.tap(find.text('Refresh'));
+        await pumpFrames(tester);
 
-      expect(find.text('Accessibility service connected'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
+        expect(find.text('Accessibility service connected'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 }

@@ -6,30 +6,65 @@ sealed class NoirUiEvent {
 
 // Maps 1:1 to TaskController core states (A5)
 class TaskStateChanged extends NoirUiEvent {
-  final TaskState state; // idle | planning | awaitingConfirmation | executing | recovering | paused | completed | failed | cancelled
+  final TaskState
+  state; // idle | planning | awaitingConfirmation | executing | recovering | paused | completed | failed | cancelled
   TaskStateChanged(this.state);
 }
 
 // EventBus secondary events (A6 pipeline)
-class StreamingTokenReceived extends NoirUiEvent { final String delta; StreamingTokenReceived(this.delta); }
-class ToolCallStarted extends NoirUiEvent { final String toolName; final int riskLevel; ToolCallStarted(this.toolName, this.riskLevel); }
-class ToolCallCompleted extends NoirUiEvent { final String toolName; final bool success; ToolCallCompleted(this.toolName, this.success); }
-class SideConversationOpened extends NoirUiEvent { final String parentMessageId; SideConversationOpened(this.parentMessageId); }
+class StreamingTokenReceived extends NoirUiEvent {
+  final String delta;
+  StreamingTokenReceived(this.delta);
+}
+
+class ToolCallStarted extends NoirUiEvent {
+  final String toolName;
+  final int riskLevel;
+  ToolCallStarted(this.toolName, this.riskLevel);
+}
+
+class ToolCallCompleted extends NoirUiEvent {
+  final String toolName;
+  final bool success;
+  ToolCallCompleted(this.toolName, this.success);
+}
+
+class SideConversationOpened extends NoirUiEvent {
+  final String parentMessageId;
+  SideConversationOpened(this.parentMessageId);
+}
 
 // Policy Engine / Cost Estimator (A6 + A9)
 class ConfirmationRequired extends NoirUiEvent {
-  final String actionDescription; final int riskTier; final String toolName; final bool screenContentWasSanitized;
-  ConfirmationRequired(this.actionDescription, this.riskTier, this.toolName, this.screenContentWasSanitized);
+  final String actionDescription;
+  final int riskTier;
+  final String toolName;
+  final bool screenContentWasSanitized;
+  ConfirmationRequired(
+    this.actionDescription,
+    this.riskTier,
+    this.toolName,
+    this.screenContentWasSanitized,
+  );
 }
+
 class CostEstimateResolved extends NoirUiEvent {
-  final String provider; final String model; final int estimatedTokens;
+  final String provider;
+  final String model;
+  final int estimatedTokens;
   CostEstimateResolved(this.provider, this.model, this.estimatedTokens);
 }
 
 // Undo Window (A6b / D15)
 class ActionCompletedWithUndoWindow extends NoirUiEvent {
-  final String actionDescription; final bool reversible; final Duration window;
-  ActionCompletedWithUndoWindow(this.actionDescription, this.reversible, this.window);
+  final String actionDescription;
+  final bool reversible;
+  final Duration window;
+  ActionCompletedWithUndoWindow(
+    this.actionDescription,
+    this.reversible,
+    this.window,
+  );
 }
 
 class UserMessageSubmitted extends NoirUiEvent {
@@ -56,4 +91,14 @@ class AssistantStreamStopped extends NoirUiEvent {
 }
 
 // Backend states mapped
-enum TaskState { idle, planning, awaitingConfirmation, executing, recovering, paused, completed, failed, cancelled }
+enum TaskState {
+  idle,
+  planning,
+  awaitingConfirmation,
+  executing,
+  recovering,
+  paused,
+  completed,
+  failed,
+  cancelled,
+}

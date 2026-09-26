@@ -26,7 +26,10 @@ class TaskController {
     emitEvent(TaskStateChanged(newState));
   }
 
-  bool isTerminal() => _state == TaskState.completed || _state == TaskState.failed || _state == TaskState.cancelled;
+  bool isTerminal() =>
+      _state == TaskState.completed ||
+      _state == TaskState.failed ||
+      _state == TaskState.cancelled;
 
   bool requiresConfirmation() => _state == TaskState.awaitingConfirmation;
 }

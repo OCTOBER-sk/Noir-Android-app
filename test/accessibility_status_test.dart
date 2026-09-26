@@ -81,12 +81,10 @@ void main() {
       // This is the stub NativeBridge.serviceStatus() hands back when the
       // channel is dead. It claims nothing and proves nothing, so a service
       // that says "connected" in it must not be believed.
-      final status = AccessibilityStatus.fromChannelMap(
-        <String, dynamic>{
-          'serviceConnected': true,
-          'canPerformGestures': true,
-        },
-      );
+      final status = AccessibilityStatus.fromChannelMap(<String, dynamic>{
+        'serviceConnected': true,
+        'canPerformGestures': true,
+      });
 
       expect(status.platformReachable, isFalse);
       expect(status.connected, isFalse);
@@ -182,29 +180,33 @@ void main() {
       expect(controller.isLoading, isFalse);
     });
 
-    test('a PlatformException degrades to unavailable without throwing',
-        () async {
-      install(
-        (call) async => throw PlatformException(
-          code: 'ERR_SERVICE_UNAVAILABLE',
-          message: 'AgentAccessibilityService is not connected',
-        ),
-      );
+    test(
+      'a PlatformException degrades to unavailable without throwing',
+      () async {
+        install(
+          (call) async => throw PlatformException(
+            code: 'ERR_SERVICE_UNAVAILABLE',
+            message: 'AgentAccessibilityService is not connected',
+          ),
+        );
 
-      final controller = AccessibilityStatusController(bridge: bridge);
-      addTearDown(controller.dispose);
+        final controller = AccessibilityStatusController(bridge: bridge);
+        addTearDown(controller.dispose);
 
-      await expectLater(controller.refresh(), completes);
+        await expectLater(controller.refresh(), completes);
 
-      expect(controller.status.platformReachable, isFalse);
-      expect(controller.status.isReady, isFalse);
-    });
+        expect(controller.status.platformReachable, isFalse);
+        expect(controller.status.isReady, isFalse);
+      },
+    );
 
     test('refresh notifies listeners and the last answer wins', () async {
       var connected = false;
-      install((call) async => _connectedStatus().map(
-            (key, value) => MapEntry(key, value),
-          )..['serviceConnected'] = connected);
+      install(
+        (call) async =>
+            _connectedStatus().map((key, value) => MapEntry(key, value))
+              ..['serviceConnected'] = connected,
+      );
 
       final controller = AccessibilityStatusController(bridge: bridge);
       addTearDown(controller.dispose);
@@ -222,24 +224,26 @@ void main() {
   });
 
   group('ScreenAuditController is fed by the real platform dump', () {
-    test('an unreachable service is unavailable, never an empty audit',
-        () async {
-      install(
-        (call) async => throw PlatformException(
-          code: 'SERVICE_UNAVAILABLE',
-          message: 'not connected',
-        ),
-      );
+    test(
+      'an unreachable service is unavailable, never an empty audit',
+      () async {
+        install(
+          (call) async => throw PlatformException(
+            code: 'SERVICE_UNAVAILABLE',
+            message: 'not connected',
+          ),
+        );
 
-      final controller = ScreenAuditController(bridge: bridge);
-      addTearDown(controller.dispose);
-      await controller.refresh();
+        final controller = ScreenAuditController(bridge: bridge);
+        addTearDown(controller.dispose);
+        await controller.refresh();
 
-      expect(controller.audit.available, isFalse);
-      expect(controller.audit.code, 'SERVICE_UNAVAILABLE');
-      expect(controller.audit.nodeCount, 0);
-      expect(controller.audit.stripped, isEmpty);
-    });
+        expect(controller.audit.available, isFalse);
+        expect(controller.audit.code, 'SERVICE_UNAVAILABLE');
+        expect(controller.audit.nodeCount, 0);
+        expect(controller.audit.stripped, isEmpty);
+      },
+    );
 
     test('a missing plugin keeps the audit unavailable', () async {
       final controller = ScreenAuditController(bridge: bridge);
@@ -273,23 +277,25 @@ void main() {
       expect(received.single.method, kMethodGetNodes);
     });
 
-    test('a dump that was read and found clean is available, not unavailable',
-        () async {
-      install(
-        (call) async => _dumpEnvelope(<Map<String, dynamic>>[
-          <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
-        ]),
-      );
+    test(
+      'a dump that was read and found clean is available, not unavailable',
+      () async {
+        install(
+          (call) async => _dumpEnvelope(<Map<String, dynamic>>[
+            <String, dynamic>{'text': 'Inbox', 'alpha': 1.0},
+          ]),
+        );
 
-      final controller = ScreenAuditController(bridge: bridge);
-      addTearDown(controller.dispose);
-      await controller.refresh();
+        final controller = ScreenAuditController(bridge: bridge);
+        addTearDown(controller.dispose);
+        await controller.refresh();
 
-      expect(controller.audit.available, isTrue);
-      expect(controller.audit.code, isNull);
-      expect(controller.audit.blockedCount, 0);
-      expect(controller.audit.cleanTextNodes, <String>['Inbox']);
-    });
+        expect(controller.audit.available, isTrue);
+        expect(controller.audit.code, isNull);
+        expect(controller.audit.blockedCount, 0);
+        expect(controller.audit.cleanTextNodes, <String>['Inbox']);
+      },
+    );
 
     test('a dump pushed by the service updates the audit', () async {
       final controller = ScreenAuditController(bridge: bridge);
@@ -313,23 +319,27 @@ void main() {
       expect(controller.audit.cleanTextNodes, <String>['pushed']);
     });
 
-    test('a controller that does not subscribe to pushes stays pull-only',
-        () async {
-      final controller =
-          ScreenAuditController(bridge: bridge, listenToPushes: false);
-      addTearDown(controller.dispose);
+    test(
+      'a controller that does not subscribe to pushes stays pull-only',
+      () async {
+        final controller = ScreenAuditController(
+          bridge: bridge,
+          listenToPushes: false,
+        );
+        addTearDown(controller.dispose);
 
-      await bridge.handlePlatformMethod(
-        MethodCall(
-          kMethodScreenNodes,
-          _dumpEnvelope(<Map<String, dynamic>>[
-            <String, dynamic>{'text': 'pushed', 'alpha': 1.0},
-          ]),
-        ),
-      );
-      await Future<void>.delayed(Duration.zero);
+        await bridge.handlePlatformMethod(
+          MethodCall(
+            kMethodScreenNodes,
+            _dumpEnvelope(<Map<String, dynamic>>[
+              <String, dynamic>{'text': 'pushed', 'alpha': 1.0},
+            ]),
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
 
-      expect(controller.audit.available, isFalse);
-    });
+        expect(controller.audit.available, isFalse);
+      },
+    );
   });
 }

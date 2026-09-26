@@ -21,10 +21,10 @@ void main() {
       final engine = PolicyEngine();
 
       for (final riskLevel in [2, 3]) {
-        final result = engine.gate(
-          <String, dynamic>{'action': 'send', 'input': 'person@example.com'},
-          riskLevel: riskLevel,
-        );
+        final result = engine.gate(<String, dynamic>{
+          'action': 'send',
+          'input': 'person@example.com',
+        }, riskLevel: riskLevel);
 
         expect(result.allowed, isTrue);
         expect(result.message, contains('send'));
@@ -72,10 +72,9 @@ void main() {
       expect(locked.needsBiometric, isFalse);
 
       engine.uiLock = false;
-      final blacklisted = engine.gate(
-        <String, dynamic>{'action': 'exfiltrate_screen'},
-        riskLevel: 3,
-      );
+      final blacklisted = engine.gate(<String, dynamic>{
+        'action': 'exfiltrate_screen',
+      }, riskLevel: 3);
       expect(blacklisted.allowed, isFalse);
       expect(blacklisted.message, 'BLACKLIST');
       expect(blacklisted.needsConfirmation, isFalse);

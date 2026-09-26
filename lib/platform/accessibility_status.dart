@@ -155,7 +155,7 @@ class AccessibilityStatus {
 /// thrown channel error resolves to [AccessibilityStatus.unavailable].
 class AccessibilityStatusController extends ChangeNotifier {
   AccessibilityStatusController({NativeBridge? bridge})
-      : _bridge = bridge ?? NativeBridge.instance;
+    : _bridge = bridge ?? NativeBridge.instance;
 
   final NativeBridge _bridge;
 
@@ -229,10 +229,10 @@ class ScreenAudit {
   });
 
   const ScreenAudit.unavailable(String this.code)
-      : available = false,
-        nodeCount = 0,
-        stripped = const <SanitizedItem>[],
-        cleanTextNodes = const <String>[];
+    : available = false,
+      nodeCount = 0,
+      stripped = const <SanitizedItem>[],
+      cleanTextNodes = const <String>[];
 
   int get blockedCount => stripped.length;
 
@@ -254,10 +254,8 @@ class ScreenAudit {
 /// the push stream the service emits while it is live. Neither can make the
 /// audit look healthy when no data arrived.
 class ScreenAuditController extends ChangeNotifier {
-  ScreenAuditController({
-    NativeBridge? bridge,
-    bool listenToPushes = true,
-  }) : _bridge = bridge ?? NativeBridge.instance {
+  ScreenAuditController({NativeBridge? bridge, bool listenToPushes = true})
+    : _bridge = bridge ?? NativeBridge.instance {
     if (listenToPushes) {
       _pushes = _bridge.screenNodeDumps.listen(_onPushedDump);
     }

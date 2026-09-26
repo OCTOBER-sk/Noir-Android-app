@@ -21,7 +21,7 @@
 - `risk_classifier.dart`: MISSING
 - `AgentAccessibilityService.kt`: `onAccessibilityEvent` empty (C1)
 - `MainActivity.kt`: no real `PolicyEngine.gate()` (C2)
-- `agent_runtime.dart`: `RiskClassifier`/`ReflectionCritic` skeleton only; undo window state only; no real countdown
+- `agent_runtime.dart`: `RiskClassifier`/`ReflectionCritic` skeleton only; undo window state only; no real countdown — pre-fix state; `ReflectionEvent` is now emitted on the real path and `UndoWindow` has a real deadline, see §3
 - `screen_content_sanitizer.dart`: operated on String only, not full node metadata (A6a)
 - `cost_estimator.dart`: static fallback array; no live OpenRouter fetch (A9)
 - `mcp_adapter.dart`: skeleton only (B2) — pre-fix state; now a full adapter, see §3
@@ -43,7 +43,8 @@
 ### Agent Runtime (A6 / A6a / A6b / A9 / A12 / A4)
 - `lib/safety/risk_classifier.dart`: NEW file. Real `RiskClassifier` with `_computeLevel()` mapping actions to tiers 0–3. Wired to `agent_runtime.dart` import.
 - `agent_runtime.dart`: Added `ReflectionCriticImpl` with real `computeConfidence()` (compares plan vs executed + sanitized content). Routes `< 0.5` to `recovery.executeReflectionRecovery()`.
-- `agent_runtime.dart`: Undo event emission added for `risk.level >= 1`.
+- `agent_runtime.dart`: `ReflectionEvent` is real (ce88363) — the pipeline builds one for every run that reaches the critic and carries it on `RuntimeResult.reflectionEvent`, success and recovery alike. The `skillId` field is gone: no `SkillStorage`/`SkillReplay` exists in `lib/`, so the key pointed nowhere.
+- `agent_runtime.dart`: Undo event emission added for `risk.level >= 1`. The countdown is real as of ce88363: `UndoWindow` holds the duration in force, `isActive()` compares against a real deadline, and `CountdownUndoWindow` passes the caller's `seconds` through and reports `elapsed` for a timeout versus `cancelled` only for the user's decision.
 - `screen_content_sanitizer.dart`: Updated `Sanitizer.sanitize()` to read full node metadata (`alpha`, `bounds`, `zOrder`, `visible`, `text`). Added `SanitizedItem` fields (`zOrder`, `alpha`, `offViewport`). Audit trail preserved.
 - `recovery_engine.dart`: Full `HierarchicalRecovery` with `needsRecovery()` (`< 50` scaled), `recoveryPath()`, `auditLog()` (structured, timestamped, uses sanitized screen).
 - `cost_estimator.dart`: Added `FreeModelCache` (live fetch simulation with TTL), `CostEstimator` now uses live array, `resolveWithFallback()` handles 429/rotation.
@@ -85,7 +86,7 @@
 - **Production backend wiring**: Command Centre streaming, Live Task View, Usage Dashboard, Skill Manager and Safety Center all have real screens and real tests, but no production backend is bound to them yet — they render their empty/injected states at runtime until one is.
 - **D6 Usage Dashboard / D7 Skill Manager / D9 Safety Center**: Screens now take injected state (`UsageSnapshot`, `SkillRecord`, policy gate) and show loading/empty/error states instead of fabricated numbers. No backend still feeds them in production.
 - **Native Android integration (MethodChannel)**: `MainActivity.kt` gate enforced; full `dispatchGesture()` integration with real `AccessibilityService` call requires runtime testing on device.
-- **MCP server configuration (added 2026-09-26)**: `lib/core/mcp_composition.dart` is the real composition root — a persisted `McpServerRecord` becomes a live adapter behind `PolicyEngine`, and an empty configuration means the app has no MCP capability at all. Verified on `feature/mcp-wiring` (1fa8228): `flutter analyze` clean, 758 tests passing. The whole-app export now includes `mcp_servers` (secret references only, redacted).
+- **MCP server configuration (added 2026-09-26)**: `lib/core/mcp_composition.dart` is the real composition root — a persisted `McpServerRecord` becomes a live adapter behind `PolicyEngine`, and an empty configuration means the app has no MCP capability at all. Verified on `feature/mcp-wiring` (1fa8228): `flutter analyze` clean, 758 tests passing at that commit; 915 tests pass on `main` at ce88363. The whole-app export now includes `mcp_servers` (secret references only, redacted).
 
 ---
 

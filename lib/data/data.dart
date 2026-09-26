@@ -10,6 +10,8 @@ export 'in_memory_key_value_store.dart';
 export 'json_file_key_value_store.dart';
 export 'job_repository.dart';
 export 'key_value_store.dart';
+export 'mcp_server_repository.dart';
+export 'mcp_server_settings.dart';
 export 'memory_repository.dart';
 export 'noir_data_layer.dart';
 export 'noir_schema.dart';

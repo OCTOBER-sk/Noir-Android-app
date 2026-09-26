@@ -11,4 +11,8 @@ abstract final class NoirCollections {
   static const String memories = 'memories';
   static const String usage = 'usage';
   static const String jobs = 'jobs';
+
+  /// MCP servers the user configured (R2/B2). Empty means the app has no MCP
+  /// capability, which the Safety Center states rather than filling in.
+  static const String mcpServers = 'mcp_servers';
 }

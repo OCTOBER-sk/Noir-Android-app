@@ -13,6 +13,7 @@ import 'job_repository.dart';
 import 'key_value_store.dart';
 import 'json_file_key_value_store.dart';
 import 'in_memory_key_value_store.dart';
+import 'mcp_server_repository.dart';
 import 'memory_repository.dart';
 import 'noir_schema.dart';
 import 'prompt_repository.dart';
@@ -33,6 +34,7 @@ class NoirDataLayer {
     required this.memories,
     required this.usage,
     required this.jobs,
+    required this.mcpServers,
   });
 
   /// The clock the layer stamps records with.
@@ -135,6 +137,12 @@ class NoirDataLayer {
         clock: clock,
         maxPageLimit: maxPageLimit,
       ),
+      mcpServers: McpServerRepository(
+        store: store,
+        secrets: secrets,
+        clock: clock,
+        maxPageLimit: maxPageLimit,
+      ),
     );
   }
 
@@ -151,6 +159,10 @@ class NoirDataLayer {
   final MemoryRepository memories;
   final UsageRepository usage;
   final JobRepository jobs;
+
+  /// The MCP servers a user configured. Empty means the app has no MCP adapter
+  /// to build, and both the composition root and the Safety Center say so.
+  final McpServerRepository mcpServers;
 
   /// Every record in every collection, with provider secrets redacted.
   ///
@@ -204,6 +216,14 @@ class NoirDataLayer {
           'items': <Map<String, Object?>>[
             for (final job in await jobs.readAll(onUnreadable: _ignore))
               <String, Object?>{...job.toJson(), 'id': job.id},
+          ],
+        },
+        NoirCollections.mcpServers: <String, Object?>{
+          'items': <Map<String, Object?>>[
+            for (final server in await mcpServers.readAll(
+              onUnreadable: _ignore,
+            ))
+              server.toRedactedJson(),
           ],
         },
         NoirCollections.usage: <String, Object?>{

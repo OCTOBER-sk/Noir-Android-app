@@ -51,6 +51,7 @@ import '../data/usage_store_bridge.dart';
 import '../memory/memory_service.dart';
 import '../platform/native_bridge.dart';
 import '../prompts/prompt_service.dart';
+import '../providers/adapters/mcp_transport_factory.dart';
 import '../providers/adapters/openrouter_adapter.dart';
 import '../providers/auth_config.dart';
 import '../providers/cancellation.dart';
@@ -74,6 +75,7 @@ import '../ui/safety_center_screen.dart';
 import '../ui/skill_manager_screen.dart';
 import '../ui/usage_dashboard_screen.dart';
 import 'agent_wiring.dart';
+import 'assistant_bridge.dart';
 import 'clock.dart';
 
 export 'agent_wiring.dart'
@@ -89,9 +91,119 @@ export 'agent_wiring.dart'
 /// Directory name Noir keeps its records under, inside a verified parent.
 const String kNoirDataDirectoryName = 'noir';
 
+/// The one subsystem whose absence makes the app not-ready: without a record
+/// store there is nowhere for a conversation, a memory, a usage figure or a
+/// configured server to live, and a ready screen would be claiming something
+/// untrue.
+const String kRequiredStartupSubsystem = 'persistence';
+
+/// The rest of the startup sequence, named so a test can assert the order.
+const String kSafetyStartupSubsystem = 'safety-policy';
+const String kMemoryStartupSubsystem = 'memory';
+const String kPromptsStartupSubsystem = 'prompts';
+const String kUsageStartupSubsystem = 'usage';
+const String kProviderStartupSubsystem = 'provider';
+const String kSafetyPipelineStartupSubsystem = 'safety-pipeline';
+const String kMcpStartupSubsystem = 'mcp';
+const String kAssistantStartupSubsystem = 'assistant';
+const String kTranscriptStartupSubsystem = 'transcript';
+
 /// How long the app waits for a human to answer a confirmation before the
 /// pipeline treats it as a refusal.
 const Duration kDefaultConsentTimeout = Duration(seconds: 45);
+
+/// --- startup -------------------------------------------------------------
+
+/// One step of the deterministic startup sequence, in the order it happened.
+///
+/// Recorded rather than asserted in a comment: the app's readiness claim is only
+/// as good as the record of what it actually brought up, and a test can compare
+/// the order against a literal.
+class StartupStep {
+  const StartupStep({required this.subsystem, required this.ok, this.detail});
+
+  /// Stable name, e.g. `persistence`, `provider`, `mcp`.
+  final String subsystem;
+
+  /// Whether the step produced a usable subsystem.
+  final bool ok;
+
+  /// What happened, in plain words. A reason, never a stack trace and never a
+  /// secret.
+  final String? detail;
+
+  @override
+  String toString() =>
+      'StartupStep($subsystem, ${ok ? 'ok' : 'failed'}'
+      '${detail == null ? '' : ': $detail'})';
+}
+
+/// A subsystem that did not come up, and whether that is fatal.
+class StartupFault {
+  const StartupFault({
+    required this.subsystem,
+    required this.reason,
+    this.required = false,
+  });
+
+  final String subsystem;
+
+  /// Why it did not come up.
+  final String reason;
+
+  /// Whether the app can honestly call itself ready with this outstanding.
+  ///
+  /// True for persistence only: without a record store there is nowhere to keep a
+  /// conversation, a memory, a usage record or a configured server, and a screen
+  /// that claims to be ready would be claiming something untrue. Everything else
+  /// degrades into a stated absence the UI can render, which is what "no provider
+  /// is configured" is.
+  final bool required;
+
+  @override
+  String toString() => 'StartupFault($subsystem: $reason)';
+}
+
+/// What the graph managed to bring up.
+sealed class StartupState {
+  const StartupState(this.steps, this.faults);
+
+  /// The sequence, in the order [NoirComposition.open] ran it.
+  final List<StartupStep> steps;
+
+  /// Everything that did not come up. Empty for [StartupReady].
+  final List<StartupFault> faults;
+
+  /// Whether the app may claim to be ready.
+  ///
+  /// False whenever a required subsystem failed, whatever else worked.
+  bool get isReady => true;
+
+  /// One line per fault, for a screen that has to say what is wrong.
+  List<String> get faultLines => <String>[
+    for (final StartupFault fault in faults)
+      '${fault.subsystem}: ${fault.reason}',
+  ];
+}
+
+/// Every step succeeded. The app is ready.
+final class StartupReady extends StartupState {
+  const StartupReady(List<StartupStep> steps) : super(steps, const []);
+}
+
+/// Some optional subsystem did not come up. The app is still ready, and says
+/// exactly what is missing rather than pretending the capability exists.
+final class StartupDegraded extends StartupState {
+  const StartupDegraded(super.steps, super.faults);
+}
+
+/// A required subsystem failed. The app is *not* ready, and says which one.
+final class StartupFailed extends StartupState {
+  const StartupFailed(super.steps, super.faults);
+
+  @override
+  bool get isReady => false;
+}
 
 /// --- data layer -----------------------------------------------------------
 
@@ -279,6 +391,9 @@ class NoirComposition extends ChangeNotifier {
   NoirComposition._({
     required this.clock,
     required this.conversation,
+    required this.assistant,
+    required this.startupSteps,
+    required List<StartupFault> startupFaults,
     required this.usage,
     required this.usageStore,
     required this.policy,
@@ -300,7 +415,11 @@ class NoirComposition extends ChangeNotifier {
     required this.provider,
     required this.jobs,
     required this.journal,
-  });
+  }) {
+    for (final StartupFault fault in startupFaults) {
+      _faults[fault.subsystem] = fault;
+    }
+  }
 
   /// The injected time source. Every record this graph writes is stamped by it.
   final Clock clock;
@@ -308,6 +427,16 @@ class NoirComposition extends ChangeNotifier {
   /// The conversation the Command Centre renders. Owned here, closed by
   /// [dispose].
   final ConversationController conversation;
+
+  /// The provider-to-conversation bridge: the real request path, from the
+  /// controller's history through a named prompt template, real memory
+  /// retrieval and the gated MCP runner to the live adapter, the controller's
+  /// deltas and real usage.
+  final ConversationBridge assistant;
+
+  /// What [open] actually did, in the order it did it. The readiness claim is
+  /// computed from this, not asserted beside it. Complete once [open] returns.
+  final List<StartupStep> startupSteps;
 
   /// The live usage counters in the Command Centre header.
   final UsageTracker usage;
@@ -383,8 +512,44 @@ class NoirComposition extends ChangeNotifier {
   int _safetySequence = 0;
   int _timelineSequence = 0;
 
+  /// One fault per subsystem, upserted as the graph and the catalog learn more.
+  final Map<String, StartupFault> _faults = <String, StartupFault>{};
+
   /// The live model catalog state. Rebuild when this changes.
   CatalogState get catalog => _catalog;
+
+  /// Whether this graph may claim to be ready.
+  ///
+  /// False the moment a required subsystem failed. Read by the splash, so a
+  /// startup that could not open its store says so instead of printing a
+  /// reassuring line over a broken graph.
+  bool get isReady => startup.isReady;
+
+  /// What the graph brought up, in plain terms.
+  ///
+  /// [StartupReady] when every step worked, [StartupDegraded] when an optional
+  /// subsystem is absent (no provider configured, memory unavailable) and
+  /// [StartupFailed] when a required one is — which is persistence, because
+  /// without a record store there is nowhere for anything the user gives Noir to
+  /// live.
+  StartupState get startup {
+    final List<StartupStep> steps = List<StartupStep>.unmodifiable(
+      startupSteps,
+    );
+    final List<StartupFault> faults = List<StartupFault>.unmodifiable(
+      _faults.values,
+    );
+    if (faults.isEmpty) return StartupReady(steps);
+    if (faults.any((StartupFault fault) => fault.required)) {
+      return StartupFailed(steps, faults);
+    }
+    return StartupDegraded(steps, faults);
+  }
+
+  void _setFault(StartupFault fault) {
+    if (_faults[fault.subsystem] == fault) return;
+    _faults[fault.subsystem] = fault;
+  }
 
   /// Confirmations waiting on a human. The UI is the only holder of one.
   Stream<PendingConfirmation> get confirmations => gate.requests;
@@ -413,9 +578,27 @@ class NoirComposition extends ChangeNotifier {
     DateTime Function()? now,
     Duration consentTimeout = kDefaultConsentTimeout,
     ProviderTransport? providerTransport,
+    McpTransportFactory? mcpTransportFactory,
   }) async {
     final Clock clock = SystemClock();
     final DateTime Function() stamp = now ?? clock.now;
+
+    // The record of what this startup did, in the order it happened. Every step
+    // below appends to it, so [startup] is computed from what really ran rather
+    // than from a promise about what should have. One fault per subsystem, keyed
+    // by name so a later read of the same subsystem refines the earlier one
+    // instead of stacking a second, vaguer complaint on top of it.
+    final List<StartupStep> steps = <StartupStep>[];
+    final Map<String, StartupFault> faults = <String, StartupFault>{};
+    void step(String subsystem, {required bool ok, String? detail}) {
+      steps.add(StartupStep(subsystem: subsystem, ok: ok, detail: detail));
+      if (ok) return;
+      faults[subsystem] = StartupFault(
+        subsystem: subsystem,
+        reason: detail ?? 'It could not be started.',
+        required: subsystem == kRequiredStartupSubsystem,
+      );
+    }
 
     // Safety first, and before anything that could ever want to act. There is
     // exactly one PolicyEngine in the process: when a bridge is injected the
@@ -429,6 +612,11 @@ class NoirComposition extends ChangeNotifier {
     final NativeBridge nativeBridge =
         bridge ??
         NativeBridge(policyEngine: policy, riskClassifier: riskClassifier);
+    step(
+      kSafetyStartupSubsystem,
+      ok: true,
+      detail: 'one PolicyEngine, one RiskClassifier, one platform bridge',
+    );
 
     // --- persistence -----------------------------------------------------
     final DataRootResolution resolution = await resolveDataRoot(
@@ -459,6 +647,15 @@ class NoirComposition extends ChangeNotifier {
     final DataWiring data = (layer == null || dataDirectory == null)
         ? DataUnavailable(dataFailure, dataAttempts)
         : DataOpened(layer, dataDirectory);
+    if (data is DataOpened) {
+      step(
+        kRequiredStartupSubsystem,
+        ok: true,
+        detail: 'records at ${data.root.path}',
+      );
+    } else {
+      step(kRequiredStartupSubsystem, ok: false, detail: dataFailure);
+    }
 
     // --- memory ----------------------------------------------------------
     MemoryWiring memory;
@@ -483,12 +680,25 @@ class NoirComposition extends ChangeNotifier {
         memory = MemoryUnavailable('Memories could not be opened: $error');
       }
     }
+    step(
+      kMemoryStartupSubsystem,
+      ok: memory is MemoryOpened,
+      detail: switch (memory) {
+        MemoryOpened() => 'service over the durable memories collection',
+        MemoryUnavailable(:final String reason) => reason,
+      },
+    );
 
     // --- prompts ---------------------------------------------------------
     // PromptService keeps its templates in process; it is constructed over the
     // injected clock and starts empty, which is the truth: this build ships no
     // template, so there is nothing to compose until a user creates one.
     final PromptService prompts = PromptService(clock: clock);
+    step(
+      kPromptsStartupSubsystem,
+      ok: true,
+      detail: 'no template ships with the app; a turn names the one it wants',
+    );
 
     // --- usage -----------------------------------------------------------
     // The tracker exists before a provider is known so the Command Centre has a
@@ -509,11 +719,28 @@ class NoirComposition extends ChangeNotifier {
       usage = UsageTracker(clock: stamp);
     }
 
+    step(
+      kUsageStartupSubsystem,
+      ok: true,
+      detail: usageStore == null
+          ? 'counters in memory; no durable usage store'
+          : 'durable usage store for provider ${providerSettings!.id}',
+    );
+
     // --- provider runtime ------------------------------------------------
     final ProviderWiring provider = await _wireProvider(
       layer: layer,
       settings: providerSettings,
       transport: providerTransport,
+    );
+    step(
+      kProviderStartupSubsystem,
+      ok: provider is ProviderReady,
+      detail: switch (provider) {
+        ProviderReady(:final ProviderSettings settings) =>
+          'endpoint ${settings.baseUrl} with the key from the secret store',
+        ProviderNotConfigured(:final String reason) => reason,
+      },
     );
 
     // --- safety stack and the A6 pipeline --------------------------------
@@ -545,6 +772,12 @@ class NoirComposition extends ChangeNotifier {
       recovery: recovery,
     );
 
+    step(
+      kSafetyPipelineStartupSubsystem,
+      ok: true,
+      detail: 'planner, gate, undo window, executor, critic, recovery',
+    );
+
     // --- MCP -------------------------------------------------------------
     // One PolicyEngine, again: McpComposition asks this instance for its
     // verdicts, so an MCP tool call and a gesture are gated by the same rules.
@@ -552,12 +785,103 @@ class NoirComposition extends ChangeNotifier {
         ? McpWiringFailed(
             'MCP needs the server configuration store: $dataFailure',
           )
-        : McpWired(McpComposition(servers: layer.mcpServers, policy: policy));
+        : McpWired(
+            McpComposition(
+              servers: layer.mcpServers,
+              policy: policy,
+              // Production opens sockets here and nowhere else; a test injects a
+              // scripted transport through the same seam.
+              transportFactory: mcpTransportFactory,
+            ),
+          );
+    step(
+      kMcpStartupSubsystem,
+      ok: mcp is McpWired,
+      detail: switch (mcp) {
+        McpWired() => 'persisted servers only, every call behind the gate',
+        McpWiringFailed(:final String reason) => reason,
+      },
+    );
 
+    // --- conversation and the assistant bridge ---------------------------
+    // The bridge is built before the graph it belongs to, and reports through a
+    // sink that reads the graph once it exists. A turn cannot start before [open]
+    // returns, so the closure is never called with an unassigned graph.
     final ConversationController conversation = ConversationController();
-    final NoirComposition composition = NoirComposition._(
+    late final NoirComposition composition;
+    void reportTurn(AssistantTurnLog entry) => composition._logTurn(entry);
+    final McpComposition? mcpComposition = mcp is McpWired
+        ? mcp.composition
+        : null;
+    final ConversationBridge assistant = ConversationBridge(
+      conversation: conversation,
+      usage: usage,
+      prompts: prompts,
+      clock: clock,
+      // The live adapter, when there is one. With no provider there is no stream
+      // to open, so the bridge is built over a function that reports the same
+      // typed absence the UI already renders rather than over a fake.
+      streamChat: switch (provider) {
+        ProviderReady(
+          :final OpenRouterAdapter adapter,
+          :final ModelRouter router,
+        ) =>
+          (ChatRequest request, {CancellationToken? cancellation}) {
+            // A turn is only ever sent to a model the live catalog really
+            // serves. An id the provider never listed is refused here rather
+            // than put on the wire, and the router's own fallback may pick a
+            // different served model instead.
+            final String requested = request.model;
+            if (!router.cachedModelIds.contains(requested)) {
+              return Stream<ProviderStreamEvent>.error(
+                ProviderException(
+                  kind: ProviderErrorKind.malformed,
+                  message: 'The provider never served the model "$requested".',
+                ),
+              );
+            }
+            return adapter.streamChat(
+              request: request,
+              cancellation: cancellation,
+            );
+          },
+        _ => _noProviderStream,
+      },
+      memories: switch (memory) {
+        MemoryOpened(:final MemoryService service) => service,
+        MemoryUnavailable() => null,
+      },
+      // The only MCP path a turn can take: McpComposition.callTool, which is
+      // where the allowlist, the classification, the policy verdict and the
+      // user/biometric facts are enforced.
+      toolRunner: mcpComposition == null
+          ? null
+          : (AssistantToolCall call) => mcpComposition.callTool(
+              call.serverId,
+              call.toolName,
+              call.arguments,
+              confirmation: call.confirmation,
+            ),
+      onLog: reportTurn,
+      // A recorded usage figure is a state change the dashboard renders, so the
+      // graph is told to republish. It is a notification, not a second accounting
+      // path: the tracker did the counting.
+      onUsage: (TokenUsage _, String __) => composition._publishUsage(),
+    );
+    step(
+      kAssistantStartupSubsystem,
+      ok: true,
+      detail: provider is ProviderReady
+          ? 'history, prompt, memory and MCP wired into the live adapter'
+          : 'no provider to stream from; a turn reports that',
+    );
+
+    composition = NoirComposition._(
+      startupFaults: faults.values.toList(growable: false),
       clock: clock,
       conversation: conversation,
+      assistant: assistant,
+      startupSteps: steps,
       usage: usage,
       usageStore: usageStore,
       policy: policy,
@@ -593,11 +917,27 @@ class NoirComposition extends ChangeNotifier {
     // rather than the record gaining a second thread.
     if (composition.journal != null) {
       try {
-        await composition.journal!.restoreLatest();
-      } on Object {
+        final int restored = await composition.journal!.restoreLatest();
+        step(
+          kTranscriptStartupSubsystem,
+          ok: true,
+          detail: 'transcript replayed: $restored message(s)',
+        );
+      } on Object catch (error) {
         // A transcript that cannot be read leaves the conversation empty, which
         // is the honest state. The store's recovery path holds the reason.
+        step(
+          kTranscriptStartupSubsystem,
+          ok: false,
+          detail: 'the stored transcript could not be replayed: $error',
+        );
       }
+    } else {
+      step(
+        kTranscriptStartupSubsystem,
+        ok: false,
+        detail: 'no store, so no transcript is kept',
+      );
     }
     return composition;
   }
@@ -668,6 +1008,17 @@ class NoirComposition extends ChangeNotifier {
   void _setCatalog(CatalogState next) {
     if (_disposed || _catalog == next) return;
     _catalog = next;
+    // A catalog that could not be read is a provider fault, not a separate
+    // mystery: the endpoint and the key may both be fine and the read may still
+    // fail, and the readiness line has to name what actually happened.
+    if (next is CatalogUnavailable && provider is ProviderReady) {
+      _setFault(
+        StartupFault(
+          subsystem: kProviderStartupSubsystem,
+          reason: 'the model catalog could not be read: ${next.reason}',
+        ),
+      );
+    }
     notifyListeners();
   }
 
@@ -763,57 +1114,40 @@ class NoirComposition extends ChangeNotifier {
   }
 
   Stream<String> _replyFor(ProviderReady wired, String model, String prompt) {
-    final ChatRequest request = ChatRequest(
-      model: model,
-      messages: <ChatMessage>[ChatMessage(ChatRole.user, prompt)],
+    // The Command Centre has already put the user's turn on the controller by the
+    // time it asks for a reply; this makes sure of it rather than assuming it, so
+    // a caller that skips that step still gets a request that matches what is on
+    // screen.
+    assistant.ensureUserTurn(prompt);
+    // The real request path: the controller's history, a named template if the
+    // caller named one, retrieved memory facts and the gated MCP runner, all
+    // assembled by the bridge over the live adapter. The Command Centre still
+    // owns the assistant turn, so the bridge only forwards deltas here.
+    return assistant
+        .deltas(AssistantTurnRequest(model: model, userText: prompt))
+        .map((String delta) {
+          // The A5 timeline still sees every token the provider really sent.
+          taskRun.emit(StreamingTokenReceived(delta));
+          return delta;
+        })
+        .transform(_assistantFailures);
+  }
+
+  /// Runs one assistant turn on this graph and returns what really happened.
+  ///
+  /// The headless sibling of [assistantReplies]: the same bridge, the same
+  /// request assembly and the same typed failures, with this graph driving the
+  /// assistant turn itself. A caller that names a template, supplies tool calls
+  /// or wants the typed outcome uses this; the Command Centre uses the stream.
+  Future<AssistantTurnOutcome> sendAssistantTurn(
+    AssistantTurnRequest request,
+  ) async {
+    // The headless path still owes the UI the same contract the Command Centre
+    // gets: every token the provider really sent is announced on the timeline.
+    return assistant.send(
+      request,
+      onDelta: (String delta) => taskRun.emit(StreamingTokenReceived(delta)),
     );
-    final StringBuffer accumulated = StringBuffer();
-    final StreamController<String> out = StreamController<String>();
-    late StreamSubscription<ProviderStreamEvent> subscription;
-    subscription = wired.adapter
-        .streamChat(request: request)
-        .listen(
-          (ProviderStreamEvent event) {
-            if (event is ProviderTextDelta) {
-              accumulated.write(event.text);
-              out.add(event.text);
-              taskRun.emit(StreamingTokenReceived(event.text));
-            } else if (event is ProviderUsage) {
-              // Real provider-reported usage, recorded durably. This is the one
-              // place tokens enter the system.
-              unawaited(
-                usage
-                    .recordUsage(model: model, usage: event.usage)
-                    .then((_) => unawaited(_publishUsage()))
-                    .catchError((Object _) {}),
-              );
-            }
-          },
-          onError: (Object error) {
-            _logSafety(
-              summary: 'Provider stream failed',
-              kind: SafetyEventKind.dispatch,
-              outcome: SafetyEventOutcome.blocked,
-              detail: '$error',
-            );
-            out.addError(error);
-            unawaited(out.close());
-          },
-          onDone: () async {
-            await subscription.cancel();
-            final String text = accumulated.toString();
-            if (text.trim().isEmpty) {
-              out.addError(
-                const AssistantUnavailable('The provider returned no content.'),
-              );
-            }
-            await out.close();
-            await _publishUsage();
-          },
-          cancelOnError: true,
-        );
-    out.onCancel = () => subscription.cancel();
-    return out.stream;
   }
 
   /// Runs one user-requested action on the current screen, through the A6
@@ -1032,6 +1366,23 @@ class NoirComposition extends ChangeNotifier {
     );
   }
 
+  /// Forwards one of the bridge's log lines into the safety log.
+  ///
+  /// The bridge redacts before it hands a line over, so what lands here is what
+  /// the Safety Center can show: what a turn did, never what the user typed, what
+  /// a memory held or what a server sent.
+  void _logTurn(AssistantTurnLog entry) {
+    if (_disposed) return;
+    _logSafety(
+      summary: entry.summary,
+      kind: entry.untrusted
+          ? SafetyEventKind.sanitization
+          : SafetyEventKind.dispatch,
+      outcome: SafetyEventOutcome.unknown,
+      detail: entry.detail,
+    );
+  }
+
   void _logSafety({
     required String summary,
     required SafetyEventKind kind,
@@ -1085,6 +1436,15 @@ class NoirComposition extends ChangeNotifier {
     _disposed = true;
     gate.revokeAll();
     undoWindow.cancel();
+    // A turn in flight is holding a provider stream and may still be writing
+    // usage, so it is drained first: closing a store underneath a running turn
+    // is how a real usage record goes missing.
+    try {
+      await assistant.settle();
+    } on Object {
+      // Reported through the safety log; teardown continues so the rest of the
+      // graph still shuts down cleanly.
+    }
     try {
       await usage.flush();
     } on Object {
@@ -1136,13 +1496,38 @@ class NoirComposition extends ChangeNotifier {
 /// "no backend" and "the backend said no" are different, both visible, and
 /// neither replaced by a reply that was never generated.
 class AssistantUnavailable implements Exception {
-  const AssistantUnavailable(this.reason);
+  const AssistantUnavailable(this.reason, {this.cause});
 
   final String reason;
+
+  /// The bridge's typed failure, when this unavailability came from a turn. Null
+  /// for a graph-level absence (no provider configured), where no turn was ever
+  /// attempted.
+  final AssistantTurnFailure? cause;
 
   @override
   String toString() => reason;
 }
+
+/// Maps a bridge failure onto the reason the Command Centre renders.
+///
+/// The widget shows [AssistantUnavailable.toString], which is the reason and
+/// nothing else, so the wording on screen is unchanged; the typed
+/// [AssistantTurnFailure] travels beside it for anything that wants the kind.
+final StreamTransformer<String, String> _assistantFailures =
+    StreamTransformer<String, String>.fromHandlers(
+      handleError:
+          (Object error, StackTrace stackTrace, EventSink<String> sink) {
+            if (error is AssistantTurnFailure) {
+              sink.addError(
+                AssistantUnavailable(error.reason, cause: error),
+                stackTrace,
+              );
+              return;
+            }
+            sink.addError(error, stackTrace);
+          },
+    );
 
 /// The lifecycle a scheduled job is in, as the skill registry's vocabulary.
 ///
@@ -1374,6 +1759,21 @@ List<Directory> defaultDataRootCandidates() => <Directory>[
   Directory.systemTemp,
 ];
 
+/// The streaming call a bridge uses when no provider is configured.
+///
+/// It fails immediately with a typed absence rather than producing a stream of
+/// nothing: a turn that cannot be sent has to say so, and a silently empty stream
+/// is indistinguishable from a model that replied with silence.
+Stream<ProviderStreamEvent> _noProviderStream(
+  ChatRequest request, {
+  CancellationToken? cancellation,
+}) => Stream<ProviderStreamEvent>.error(
+  const AssistantTurnFailure(
+    kind: AssistantTurnFailureKind.notConfigured,
+    reason: 'No provider is configured.',
+  ),
+);
+
 /// The first provider record in id order, or null when there is none.
 Future<ProviderSettings?> _firstProviderSettings(NoirDataLayer? layer) async {
   if (layer == null) return null;
@@ -1417,6 +1817,15 @@ Future<ProviderWiring> _wireProvider({
     );
   }
   final String? key = await layer.settings.resolveSecret(settings.id);
+  if (key == null || key.isEmpty) {
+    // The record exists but carries no credential. Noir will not invent one and
+    // will not silently run the endpoint unauthenticated behind the user's back.
+    return ProviderNotConfigured(
+      'The provider "${settings.displayName}" has no credential saved. Noir '
+      'does not ship a default key.',
+      unreadable: <String>[settings.id],
+    );
+  }
   final ProviderAuthConfig auth;
   try {
     auth = ProviderAuthConfig(baseUrl: settings.baseUrl, apiKey: key);

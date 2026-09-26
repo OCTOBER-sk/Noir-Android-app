@@ -1,73 +1,18 @@
-// E10 — Provider routing + budget guard + fallback chain (per V2.2 §E10).
-// Every assertion runs real code from lib/. Honest scope note: FreeModelCache
-// still resolves from a local TTL cache — the https://openrouter.ai/api/v1
-// models call is not implemented yet — so these tests assert that real
-// contract, not a live-network claim.
+// E10 — Provider budget guard (per V2.2 §E10).
+// Every assertion runs real code from lib/. Scope note, kept honest: the
+// cost/budget surface under test here is lib/agent/cost_estimator.dart, which
+// is outside the provider-runtime change. The provider layer itself (live
+// model discovery, routing, streaming, retries, usage) is covered in
+// test/provider_chat_test.dart, test/provider_resilience_test.dart,
+// test/provider_discovery_test.dart and test/provider_usage_test.dart. The
+// previous assertions in this file that a hard-coded model array was a "live"
+// resolved list were removed: live discovery is now performed against a real
+// `/models` payload and fails loudly when it cannot be read.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noir_android_app/agent/cost_estimator.dart';
-import 'package:noir_android_app/providers/model_router.dart';
 
 void main() {
-  group('Provider routing and budget guard (E10 V2.2)', () {
-    late List<String> cachedModelsSnapshot;
-    late DateTime lastRefreshSnapshot;
-
-    setUp(() {
-      cachedModelsSnapshot = List<String>.of(FreeModelCache.cachedModels);
-      lastRefreshSnapshot = FreeModelCache.lastRefresh;
-    });
-
-    tearDown(() {
-      FreeModelCache.cachedModels = cachedModelsSnapshot;
-      FreeModelCache.lastRefresh = lastRefreshSnapshot;
-    });
-
-    bool isFreeTier(Iterable<String> ids) =>
-        ids.every((id) => id.endsWith(':free'));
-
-    test('ModelRouter resolves the free-tier list held by FreeModelCache', () async {
-      final models = await ModelRouter.resolve();
-
-      expect(models, isNotEmpty);
-      expect(models, FreeModelCache.cachedModels);
-      expect(isFreeTier(models), isTrue);
-      expect(models.toSet().length, models.length, reason: 'no duplicates');
-    });
-
-    test('FreeModelCache refreshes an expired TTL entry on the next resolve', () async {
-      FreeModelCache.lastRefresh = DateTime.now().subtract(
-        FreeModelCache.ttl + const Duration(minutes: 1),
-      );
-
-      final models = await ModelRouter.resolve();
-
-      expect(
-        DateTime.now().difference(FreeModelCache.lastRefresh),
-        lessThan(FreeModelCache.ttl),
-        reason: 'stale entry must be refreshed',
-      );
-      expect(isFreeTier(models), isTrue);
-    });
-
-    test('a rotation event is non-fatal and does not change routing', () async {
-      final before = await ModelRouter.resolve();
-
-      ModelRouter.handleRotationEvent(before.first);
-
-      final after = await ModelRouter.resolve();
-      expect(after, before);
-    });
-
-    test('fallback array is a three-model free-tier chain', () {
-      expect(ModelRouter.fallbackArray, hasLength(3));
-      expect(isFreeTier(ModelRouter.fallbackArray), isTrue);
-      expect(
-        ModelRouter.fallbackArray.toSet().length,
-        ModelRouter.fallbackArray.length,
-        reason: 'no duplicates',
-      );
-    });
-
+  group('Provider budget guard (E10 V2.2)', () {
     test('budget guard constants are the documented free-tier caps', () {
       expect(OPENROUTER_FREE_RPM_CAP, equals(20));
       expect(OPENROUTER_FREE_DAILY_CAP_UNFUNDED, equals(50));
@@ -93,20 +38,23 @@ void main() {
       expect(estimate.fallbackIds.toSet().length, estimate.fallbackIds.length);
     });
 
-    test('resolveWithFallback walks the chain in order, then fails loudly', () async {
-      final ids = ModelRouter.fallbackArray;
+    test(
+      'resolveWithFallback walks the chain in order, then fails loudly',
+      () async {
+        const List<String> ids = <String>['vendor/a:free', 'vendor/b:free'];
 
-      for (var attempt = 0; attempt < ids.length; attempt++) {
-        expect(
-          await CostEstimator.resolveWithFallback(ids, attempt: attempt),
-          equals(ids[attempt]),
+        for (var attempt = 0; attempt < ids.length; attempt++) {
+          expect(
+            await CostEstimator.resolveWithFallback(ids, attempt: attempt),
+            equals(ids[attempt]),
+          );
+        }
+
+        await expectLater(
+          CostEstimator.resolveWithFallback(ids, attempt: ids.length),
+          throwsA(isA<Exception>()),
         );
-      }
-
-      await expectLater(
-        CostEstimator.resolveWithFallback(ids, attempt: ids.length),
-        throwsA(isA<Exception>()),
-      );
-    });
+      },
+    );
   });
 }

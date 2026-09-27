@@ -27,7 +27,7 @@
 - `mcp_adapter.dart`: skeleton only (B2) — pre-fix state; now a full adapter, see §3
 - `model_router.dart`: static array; no live refresh (B3)
 - `recovery_engine.dart`: minimal (A4)
-- `command_centre_screen.dart`: skeleton widget; no real `Stream` consumer (D2); `UndoToast` (D15) missing
+- `command_centre_screen.dart`: skeleton widget; no real `Stream` consumer (D2); `UndoToast` (D15) missing — pre-fix state; the screen now subscribes to the controller stream and `UndoToast` exists, see §3
 - `test/agent_test.dart`: placeholder assertions (`expect(true, isTrue)`) (E4)
 - `test/providers_test.dart`: placeholder assertions (E10)
 - Project completion estimate: **~35/100** before fix.

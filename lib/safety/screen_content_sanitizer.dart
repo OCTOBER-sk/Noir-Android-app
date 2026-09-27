@@ -8,6 +8,10 @@ enum Reason {
   REASON_OFF_SCREEN,
   REASON_ZERO_WIDTH,
   REASON_BIDI_OVERRIDE,
+
+  /// The node reports itself not visible. Previously this case fell through to
+  /// REASON_ZERO_ALPHA, which logged a reason the service never stated.
+  REASON_NOT_VISIBLE,
 }
 
 class SanitizedItem {
@@ -69,12 +73,13 @@ class Sanitizer {
             ? Reason.REASON_ZERO_ALPHA
             : offViewport
             ? Reason.REASON_OFF_SCREEN
+            : !visible
+            ? Reason.REASON_NOT_VISIBLE
             : text.trim().isEmpty
             ? Reason.REASON_ZERO_WIDTH
             : hasBidi
             ? Reason.REASON_BIDI_OVERRIDE
-            : Reason
-                  .REASON_ZERO_ALPHA; // invisible nodes fall through to zero-alpha category
+            : Reason.REASON_ZERO_ALPHA;
         stripped.add(
           SanitizedItem(
             text,

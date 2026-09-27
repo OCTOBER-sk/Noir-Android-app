@@ -22,10 +22,10 @@
 - `AgentAccessibilityService.kt`: `onAccessibilityEvent` empty (C1) — pre-fix state; the override now builds a full metadata-preserving node dump gated on a live user request, see §3
 - `MainActivity.kt`: no real `PolicyEngine.gate()` (C2) — pre-fix state; gesture execution now returns `POLICY_BLOCKED` when the engine denies, see §3
 - `agent_runtime.dart`: `RiskClassifier`/`ReflectionCritic` skeleton only; undo window state only; no real countdown — pre-fix state; `ReflectionEvent` is now emitted on the real path and `UndoWindow` has a real deadline, see §3
-- `screen_content_sanitizer.dart`: operated on String only, not full node metadata (A6a)
-- `cost_estimator.dart`: static fallback array; no live OpenRouter fetch (A9)
+- `screen_content_sanitizer.dart`: operated on String only, not full node metadata (A6a) — pre-fix state; it now reads bounds/alpha/zOrder/visible off each node, and an invisible node reports REASON_NOT_VISIBLE instead of being mislabelled zero-alpha, see §3
+- `cost_estimator.dart`: static fallback array; no live OpenRouter fetch (A9) — pre-fix state; `FreeModelCache` and the invented `openrouter/free-model-a|b|c` ids are gone. The file owns only the cap numbers and chain order, and takes the chain from the live catalog the caller read, so an empty catalog yields an empty chain rather than a padded one, see §3
 - `mcp_adapter.dart`: skeleton only (B2) — pre-fix state; now a full adapter, see §3
-- `model_router.dart`: static array; no live refresh (B3)
+- `model_router.dart`: static array; no live refresh (B3) — pre-fix state as of a66091f; `route()` now resolves against the fetched catalog with a TTL cache, and the §3 note claiming it called `FreeModelCache` was inaccurate and is corrected, see §3
 - `recovery_engine.dart`: minimal (A4)
 - `command_centre_screen.dart`: skeleton widget; no real `Stream` consumer (D2); `UndoToast` (D15) missing — pre-fix state; the screen now subscribes to the controller stream and `UndoToast` exists, see §3
 - `test/agent_test.dart`: placeholder assertions (`expect(true, isTrue)`) (E4) — fixed; no placeholder assertions remain in the file
@@ -47,18 +47,18 @@
 - `agent_runtime.dart`: Undo event emission added for `risk.level >= 1`. The countdown is real as of ce88363: `UndoWindow` holds the duration in force, `isActive()` compares against a real deadline, and `CountdownUndoWindow` passes the caller's `seconds` through and reports `elapsed` for a timeout versus `cancelled` only for the user's decision.
 - `screen_content_sanitizer.dart`: Updated `Sanitizer.sanitize()` to read full node metadata (`alpha`, `bounds`, `zOrder`, `visible`, `text`). Added `SanitizedItem` fields (`zOrder`, `alpha`, `offViewport`). Audit trail preserved.
 - `recovery_engine.dart`: Full `HierarchicalRecovery` with `needsRecovery()` (`< 50` scaled), `recoveryPath()`, `auditLog()` (structured, timestamped, uses sanitized screen).
-- `cost_estimator.dart`: Added `FreeModelCache` (live fetch simulation with TTL), `CostEstimator` now uses live array, `resolveWithFallback()` handles 429/rotation.
+- `cost_estimator.dart`: `FreeModelCache` and the invented `openrouter/free-model-a|b|c` ids are REMOVED. The file now owns only the cap numbers and chain order; `estimate()` requires `availableFallbackIds` from the caller, and `composition_root.costPlan()` supplies the ids the live catalog actually served. An empty catalog produces an empty chain. `resolveWithFallback()` is synchronous index selection that throws on exhaustion (including a negative attempt) instead of silently returning a plausible id.
 
 ### Providers (B2 / B3)
 - `mcp_adapter.dart`: FULL adapter. Added `MCPServerConfig`, `MCPToolDef` (`backgroundSafe`, `uiBound`), `callTool()` (JSON-RPC 2.0), `listTools()` (per-tool classification). Zone 5 untrusted input documented.
-- `model_router.dart`: `resolve()` calls `FreeModelCache.fetchLive()` instead of static array. `handleRotationEvent()` treats rotation as normal event.
+- `model_router.dart`: `route()` resolves against the catalog `ModelDiscovery` really fetched, caching it for `cacheTtl` and refetching on expiry; preferred ids that vanished are reported through `rotations` and skipped. No static list and no `FreeModelCache` are involved — a corrected §3 note, the earlier "calls FreeModelCache.fetchLive()" line was never true.
 
 ### UI / Contract (D2 / D15 / D3)
 - `command_centre_screen.dart`: Added `UndoToast` widget (monochrome, `nearBlack` bg, `pureWhite` text, 12px radius, countdown bar `surfaceDark2`, no color urgency). Wired description `actionDescription`, `reversible`, `window`.
 
 ### Tests (E4 / E10)
-- `test/agent_test.dart`: Real assertions (`expect()` against `SanitizedResult` fields, `Reason.REASON_ZERO_ALPHA`, `REASON_OFF_SCREEN`, `REASON_BIDI_OVERRIDE`, invisible nodes). No more `expect(true, isTrue)` for injection cases.
-- `test/providers_test.dart`: Real assertions (`expect(models.isNotEmpty, isTrue)`, `expect(length, equals(3))`, `expect(OPENROUTER_FREE_RPM_CAP, equals(20))`).
+- `test/agent_test.dart`: Real assertions (`expect()` against `SanitizedResult` fields, `Reason.REASON_ZERO_ALPHA`, `REASON_OFF_SCREEN`, `REASON_BIDI_OVERRIDE`, `REASON_NOT_VISIBLE`). No more `expect(true, isTrue)` for injection cases.
+- `test/providers_test.dart`: Real assertions — the documented cap constants, the funded/unfunded cap selection, and (new) that the chain is carried verbatim from the caller, is empty for an empty catalog, is unmodifiable, and that `resolveWithFallback` walks in order then throws on exhaustion and on a negative attempt.
 
 ---
 
@@ -111,6 +111,8 @@
 - Confirmed `MainActivity.kt` never allows execution without `PolicyEngine.gate()` evaluation.
 - Confirmed `screen_content_sanitizer.dart` uses `visible`, `alpha`, `zOrder`, `bounds`, `bidi` checks.
 - Confirmed `agent_runtime.dart` integrates `ReflectionCriticImpl`, `UndoWindow`, and emits events.
+- Grepped `lib/` for `FreeModelCache` after its removal: zero references remain, which is also what disproved the earlier "model_router calls FreeModelCache.fetchLive()" note.
+- Re-ran `flutter analyze` (No issues found) and `flutter test` (928 passed) on `fix/honest-cost-plan` after these edits.
 
 ---
 

@@ -1235,6 +1235,7 @@ class NoirComposition extends ChangeNotifier {
     final CostEstimate estimate = CostEstimator.estimate(
       funded: wired.settings.funded,
       usedToday: usedToday,
+      availableFallbackIds: fallbacks,
     );
     return CostPlan(
       rpmCap: estimate.rpmHeadroom,

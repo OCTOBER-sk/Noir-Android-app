@@ -82,6 +82,11 @@ void main() {
       expect(result.stripped, hasLength(1));
       expect(result.stripped.single.text, 'invisible text');
       expect(result.stripped.single.nodeIndex, 0);
+      // The reason must name what the service actually reported. An invisible
+      // node is not a zero-alpha node, and logging it as one misdirects the
+      // Safety Center lookup.
+      expect(result.stripped.single.reason, Reason.REASON_NOT_VISIBLE);
+      expect(result.stripped.single.reason, isNot(Reason.REASON_ZERO_ALPHA));
     });
 
     test('clean nodes are returned untouched with their original order', () {

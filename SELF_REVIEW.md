@@ -18,9 +18,9 @@
 ---
 
 ## 2. Gaps found (pre-fix) — summarized
-- `risk_classifier.dart`: MISSING
-- `AgentAccessibilityService.kt`: `onAccessibilityEvent` empty (C1)
-- `MainActivity.kt`: no real `PolicyEngine.gate()` (C2)
+- `risk_classifier.dart`: MISSING — fixed; `lib/safety/risk_classifier.dart` exists with a real tiered `_computeLevel()` and is wired into `agent_runtime.dart`, see §3
+- `AgentAccessibilityService.kt`: `onAccessibilityEvent` empty (C1) — pre-fix state; the override now builds a full metadata-preserving node dump gated on a live user request, see §3
+- `MainActivity.kt`: no real `PolicyEngine.gate()` (C2) — pre-fix state; gesture execution now returns `POLICY_BLOCKED` when the engine denies, see §3
 - `agent_runtime.dart`: `RiskClassifier`/`ReflectionCritic` skeleton only; undo window state only; no real countdown — pre-fix state; `ReflectionEvent` is now emitted on the real path and `UndoWindow` has a real deadline, see §3
 - `screen_content_sanitizer.dart`: operated on String only, not full node metadata (A6a)
 - `cost_estimator.dart`: static fallback array; no live OpenRouter fetch (A9)
@@ -28,8 +28,8 @@
 - `model_router.dart`: static array; no live refresh (B3)
 - `recovery_engine.dart`: minimal (A4)
 - `command_centre_screen.dart`: skeleton widget; no real `Stream` consumer (D2); `UndoToast` (D15) missing — pre-fix state; the screen now subscribes to the controller stream and `UndoToast` exists, see §3
-- `test/agent_test.dart`: placeholder assertions (`expect(true, isTrue)`) (E4)
-- `test/providers_test.dart`: placeholder assertions (E10)
+- `test/agent_test.dart`: placeholder assertions (`expect(true, isTrue)`) (E4) — fixed; no placeholder assertions remain in the file
+- `test/providers_test.dart`: placeholder assertions (E10) — fixed; no placeholder assertions remain in the file
 - Project completion estimate: **~35/100** before fix.
 
 ---

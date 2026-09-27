@@ -118,4 +118,12 @@
 
 ---
 
-**Self-review verdict:** Backend gaps identified in the initial verification are properly fixed. Security-critical path (C1/C2) enforced. Agent runtime pipeline (A6/A6a/A6b/A9/A12/A4) has real logic. Provider layer (B2/B3) has functional adapters. Tests have real assertions. Design docs and proof artifacts remain intact. Minor remaining gaps (full interactive streaming UI, dedicated D3 screen, full device-level `dispatchGesture` test) are acknowledged and non-blocking per user priority.
+**Self-review verdict:** Backend gaps identified in the initial verification are properly fixed. Security-critical path (C1/C2) enforced. Agent runtime pipeline (A6/A6a/A6b/A9/A12/A4) has real logic. Provider layer (B2/B3) has functional adapters. Tests have real assertions. Design docs and proof artifacts remain intact.
+
+The three "remaining gaps" previously listed here — full interactive streaming UI, dedicated D3 screen, and a device-level `dispatchGesture` test — were re-checked against the code on `main` at eadff66 this heartbeat and all three are closed, so the sentence claiming they are outstanding has been removed rather than left to imply unfinished work:
+
+- **Streaming UI is wired end to end.** `AssistantBridge.send(request, onDelta:)` streams real provider deltas; `NoirComposition.sendAssistantTurn` (`composition_root.dart:1332`) forwards each one as `StreamingTokenReceived`; `command_centre_screen.dart:1153` consumes that event and `:371` pipes `replyStream` deltas into `ConversationController.appendAssistantDelta`. The Command Centre renders a blinking caret while tokens arrive (`:1110`).
+- **D3 has a real screen and is reachable in the shipped graph.** `lib/ui/live_task_view.dart` (462 lines) is instantiated by `operations_sheet.dart:251` on the injected `taskTimeline` stream, and is imported by `composition_root.dart:78` — so it is reachable from `lib/main.dart`, not test-only.
+- **`dispatchGesture` is covered.** 28 tests in `test/native_bridge_test.dart`, including the gate-clear path that asserts execution is reported only when the gate clears.
+
+One caveat that is genuinely still open and is *not* covered above: there is no real-device or emulator run. Every claim here rests on `flutter test` and `flutter analyze`; no assertion in this document has been observed executing Android accessibility automation on hardware.

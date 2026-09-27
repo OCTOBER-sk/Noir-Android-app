@@ -60,6 +60,7 @@ import 'core/conversation_controller.dart';
 import 'providers/usage_tracker.dart';
 import 'ui/command_centre_screen.dart';
 import 'ui/operations_sheet.dart';
+import 'ui/settings_screen.dart';
 import 'core/theme/noir_theme.dart';
 
 void main() {
@@ -211,6 +212,11 @@ class _SplashScreenState extends State<SplashScreen> {
       bridge: composition.bridge,
       mcp: composition.mcp,
       replyStream: composition.assistantReplies,
+      // The real event bus. Without this the Command Centre's streaming rows,
+      // confirmation card, undo toast and skeleton loader were unreachable: the
+      // screen had the renderer but no source, so the graph could emit real
+      // events and the screen still showed none of them.
+      events: composition.taskRun.events,
       operations: OperationsSheet(
         bridge: composition.bridge,
         taskTimeline: composition.taskTimeline(),
@@ -226,6 +232,37 @@ class _SplashScreenState extends State<SplashScreen> {
         onRun: (AutomationRequest request) async {
           await composition.runAutomation(request);
         },
+      ),
+      onOpenSettings: _openSettings,
+    );
+  }
+
+  /// Opens the settings screen over the real settings repository.
+  ///
+  /// The graph wires its provider runtime once, at startup, so a key saved here
+  /// takes effect on the next launch rather than instantly. The screen says so
+  /// after a save instead of implying the running graph picked it up.
+  Future<void> _openSettings() async {
+    final NoirComposition composition = widget.composition;
+    final DataWiring data = composition.data;
+    if (data is! DataOpened) {
+      // No writable store means nowhere to keep a key. Said plainly rather than
+      // opening a form that could not save anything.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Noir has no writable store on this device, so a provider key '
+            'cannot be saved.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsScreen(settings: data.layer.settings),
       ),
     );
   }

@@ -209,7 +209,18 @@ class ConsentGate implements Gate {
   final Map<String, String> _approvals = <String, String>{};
 
   int _sequence = 0;
-  Timer? _expiry;
+
+  /// One expiry timer per outstanding request.
+  ///
+  /// This was a single `Timer? _expiry` field, which deadlocked the whole graph
+  /// the moment two requests overlapped: each new `check` cancelled the previous
+  /// request's only timer, so that request's `Completer` was never completed and
+  /// its `await answer.future` hung forever. That hang propagated up through
+  /// `runDueJobs` (whose default `maxConcurrentRuns` is 2, so two due jobs do
+  /// overlap), leaving the automation scheduler's `_inFlight` stuck true and
+  /// skipping every later tick for the life of the process. The timers are keyed
+  /// by request id and only ever cancel themselves.
+  final Map<String, Timer> _expiries = <String, Timer>{};
 
   /// Confirmations waiting for a human. The UI listens here.
   Stream<PendingConfirmation> get requests => _requests.stream;
@@ -233,8 +244,9 @@ class ConsentGate implements Gate {
       if (!answer.isCompleted) answer.complete(approved);
     };
     _requests.add(request);
-    _expiry?.cancel();
-    _expiry = Timer(timeout, () {
+    // Per-request, so an overlapping request can never cancel this one's only
+    // path to settling.
+    _expiries[request.requestId] = Timer(timeout, () {
       // Expiry is a refusal. The request stays visible to the UI so it can be
       // rendered as "not answered"; it simply stops being answerable.
       if (!answer.isCompleted) answer.complete(false);
@@ -250,8 +262,8 @@ class ConsentGate implements Gate {
       }
       return approved;
     } finally {
-      _expiry?.cancel();
-      _expiry = null;
+      // Only this request's timer, only once.
+      _expiries.remove(request.requestId)?.cancel();
     }
   }
 
@@ -270,8 +282,12 @@ class ConsentGate implements Gate {
   /// controller that never had a subscriber never completes its done future, so
   /// awaiting it would make teardown hang on a gate nobody ever asked.
   Future<void> dispose() async {
-    _expiry?.cancel();
-    _expiry = null;
+    // Every outstanding request's timer, so none of them is left holding the
+    // process open after teardown.
+    for (final Timer timer in _expiries.values) {
+      timer.cancel();
+    }
+    _expiries.clear();
     _approvals.clear();
     if (!_requests.isClosed) unawaited(_requests.close());
   }

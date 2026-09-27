@@ -71,6 +71,8 @@ class CommandCentreScreen extends StatefulWidget {
     this.bridge,
     this.operations,
     this.mcp,
+    this.events,
+    this.onOpenSettings,
   });
 
   /// Injected in tests. Production leaves it null and the screen owns the
@@ -100,6 +102,29 @@ class CommandCentreScreen extends StatefulWidget {
   /// prompt. Null renders no control for it at all, rather than a button that
   /// opens an empty sheet.
   final Widget? operations;
+
+  /// The real A5/A6 event bus: streaming tokens, tool calls, confirmation
+  /// requests, undo windows and every other `NoirUiEvent` the graph emits.
+  ///
+  /// This parameter exists because the screen's whole event-driven half — the
+  /// streaming row, the confirmation card, the undo toast, the skeleton loader
+  /// — had exactly one entry point, `pushRealEvent`, and that method had no
+  /// caller anywhere in `lib/` or `test/`. It also sat on a library-private
+  /// `State`, so no code outside this file could call it. The event renderer was
+  /// unreachable by construction, which is why the graph could emit real events
+  /// and the screen still showed none of them.
+  ///
+  /// Null means no event source is connected, and the screen says so through the
+  /// states it already has rather than pretending to be live.
+  final Stream<NoirUiEvent>? events;
+
+  /// Opens the screen where a provider, its base URL and its API key are
+  /// configured. Null renders no settings control, rather than a button that
+  /// goes nowhere.
+  ///
+  /// This is the only way a real user can reach [SettingsRepository.setSecret],
+  /// and therefore the only way the app can acquire a provider at all.
+  final VoidCallback? onOpenSettings;
 
   /// What the composition root built for MCP, handed to the Safety Center so
   /// the two never disagree about whether Noir has MCP capability. Null means
@@ -147,6 +172,25 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
     super.initState();
     _bindController(widget.controller, owns: widget.controller == null);
     _bindAccessibility(widget.bridge);
+    _bindEvents(widget.events);
+  }
+
+  /// Subscription to the injected real event bus.
+  ///
+  /// Deliberately NOT [_events]: that field holds the conversation controller's
+  /// own event stream, bound by [_bindController]. Sharing one field for two
+  /// independent subscriptions meant `initState` bound the controller and then
+  /// cancelled and overwrote it here, leaving the conversation stream dead so
+  /// assistant text never reached the timeline.
+  StreamSubscription<NoirUiEvent>? _busEvents;
+
+  /// Subscribes to the real event bus and drives the event-driven half of the
+  /// screen through [pushRealEvent], which is what it was always written for.
+  void _bindEvents(Stream<NoirUiEvent>? events) {
+    unawaited(_busEvents?.cancel());
+    _busEvents = null;
+    if (events == null) return;
+    _busEvents = events.listen(pushRealEvent);
   }
 
   @override
@@ -155,6 +199,9 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
     if (!identical(oldWidget.bridge, widget.bridge)) {
       _unbindAccessibility();
       _bindAccessibility(widget.bridge);
+    }
+    if (!identical(oldWidget.events, widget.events)) {
+      _bindEvents(widget.events);
     }
     if (identical(oldWidget.controller, widget.controller)) {
       return;
@@ -173,6 +220,8 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
   void dispose() {
     _unbindController();
     _unbindAccessibility();
+    unawaited(_busEvents?.cancel());
+    _busEvents = null;
     _composer.dispose();
     _composerFocus.dispose();
     _scroll.dispose();
@@ -463,6 +512,7 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
                 onOpenOperations: widget.operations == null
                     ? null
                     : _openOperations,
+                onOpenSettings: widget.onOpenSettings,
               ),
               Expanded(child: _buildMessageArea()),
               const SizedBox(height: 8),
@@ -633,6 +683,7 @@ class _HeaderBar extends StatelessWidget {
     required this.accessibilityStatus,
     required this.onOpenSafetyCenter,
     this.onOpenOperations,
+    this.onOpenSettings,
   });
 
   final bool streamActive;
@@ -643,6 +694,9 @@ class _HeaderBar extends StatelessWidget {
   /// Null renders no operations control, which is what a screen with nothing
   /// wired behind it should look like.
   final VoidCallback? onOpenOperations;
+
+  /// Null renders no settings control.
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -751,6 +805,21 @@ class _HeaderBar extends StatelessWidget {
                     color: Color(0xFF888888),
                   ),
                   tooltip: 'Tasks, usage and automations',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+              if (onOpenSettings != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: onOpenSettings,
+                  icon: const Icon(
+                    Icons.settings_outlined,
+                    size: 16,
+                    color: Color(0xFF888888),
+                  ),
+                  tooltip: 'Provider and API key',
                   visualDensity: VisualDensity.compact,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),

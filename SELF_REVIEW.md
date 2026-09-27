@@ -68,10 +68,10 @@
 |---|---|---|
 | R1/A6a — Screen-Content Sanitizer (deterministic, logs audit) | ✅ FIXED | `screen_content_sanitizer.dart` real; `SanitizedItem` has audit fields |
 | R1/A6b — Undo Window (5s, cancellable, risk >= 1) | ✅ FIXED | `agent_runtime.dart` event + `UndoToast` widget |
-| R1/A9 — Cost constants + live fetch + fallback array | ✅ FIXED | `cost_estimator.dart` `FreeModelCache`, `resolveWithFallback()` |
+| R1/A9 — Cost constants + live fetch + fallback array | ✅ FIXED | `lib/agent/cost_estimator.dart` — `estimate()` takes `availableFallbackIds` from the caller (`composition_root.costPlan()`), `resolveWithFallback()` walks the chain in order. `FreeModelCache` is gone; `grep -r FreeModelCache lib/` returns 0 |
 | R1/A12 — Reflection/Critic (confidence score, low -> recovery) | ✅ FIXED | `ReflectionCriticImpl.computeConfidence()`; routes to `recovery` |
 | R2/B2 — MCP adapter (JSON-RPC 2.0, per-tool classification) | ✅ FIXED | `mcp_adapter.dart` full |
-| R2/B3 — Model Router (live refresh, rotation normal event) | ✅ FIXED | `model_router.dart` uses `FreeModelCache` |
+| R2/B3 — Model Router (live refresh, rotation normal event) | ✅ FIXED | `model_router.dart` — `catalog({forceRefresh})` calls `discovery.fetch()` and TTL-caches; `route()` picks from that catalog, `executeFallback()` walks candidates, rotations go through a `ModelRotationEvent` stream. No `FreeModelCache` |
 | R3/C1 — Enhanced AccessibilityService (node dump metadata) | ✅ FIXED | `AgentAccessibilityService.kt` `extractNodeDump()` |
 | R3/C2 — PolicyEngine gate before every `dispatchGesture` | ✅ FIXED | `MainActivity.kt` `evaluateGate()` + error response |
 | R4/D2 — Command Centre wired to `NoirUiEvent` | ✅ FIXED | `command_centre_screen.dart` subscribes to the controller stream and drives an injected responder's delta stream |

@@ -125,3 +125,12 @@ jobs:
 
       - name: Build debug APK
         run: flutter build apk --debug
+
+      # The platform suite is JUnit under android/app/src/test/kotlin and is
+      # NOT run by `flutter test` or by `assembleDebug`. Without this step the
+      # redaction, event-buffer, consent-token and gesture-gate tests exist in
+      # the tree but are never executed by any gate. The helpers under test
+      # import no android.* class, so this needs no device and no emulator —
+      # only the Android SDK the previous step already proved is present.
+      - name: Run Android platform unit tests
+        run: (cd android && ./gradlew testDebugUnitTest)

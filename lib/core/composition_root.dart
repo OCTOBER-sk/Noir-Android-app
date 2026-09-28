@@ -882,6 +882,10 @@ class NoirComposition extends ChangeNotifier {
     final NativeGestureExecutor executor = NativeGestureExecutor(
       bridge: nativeBridge,
       gate: gate,
+      // The executor is the app's only real tool-run boundary, so it is the
+      // honest emitter for the tool lifecycle events the Command Centre
+      // renders as "Using <tool>…" / "<tool> completed.".
+      publish: taskRun.emit,
     );
     final ReflectionCritic critic = ReflectionCriticImpl();
     final SanitizingRecoveryEngine recovery = SanitizingRecoveryEngine(
@@ -1300,6 +1304,19 @@ class NoirComposition extends ChangeNotifier {
         const AssistantUnavailable('The provider served no usable model.'),
       );
     }
+    // The model line the Command Centre shows is owed to the UI here: this is
+    // the one place a model is genuinely selected, with the provider that
+    // served it. Emitted before the reply starts so the row leads the tokens.
+    // The daily spend is read asynchronously; the model line itself does not
+    // wait on it, so a slow or unopened data layer cannot delay the first
+    // token. `estimatedTokens` is the real spend so far today, not a guess.
+    unawaited(
+      _usedToday().then((int usedToday) {
+        taskRun.emit(
+          CostEstimateResolved(wired.settings.id, model, usedToday),
+        );
+      }),
+    );
     return _replyFor(wired, model, prompt);
   }
 

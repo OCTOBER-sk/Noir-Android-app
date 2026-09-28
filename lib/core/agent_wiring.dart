@@ -424,11 +424,20 @@ class NativeGestureExecutor implements Executor {
   NativeGestureExecutor({
     required NativeBridge bridge,
     required ConsentGate gate,
+    this.publish,
   }) : _bridge = bridge,
        _gate = gate;
 
   final NativeBridge _bridge;
   final ConsentGate _gate;
+
+  /// Where tool lifecycle is announced on the UI event stream.
+  ///
+  /// `ToolCallStarted` / `ToolCallCompleted` are the only place in the app that
+  /// knows a tool genuinely began and genuinely finished, so this is their
+  /// emitter. The composition root forwards this to [NoirTaskRun.emit]. Left
+  /// null in tests that only care about the dispatch outcome.
+  final void Function(NoirUiEvent event)? publish;
 
   @override
   Future<dynamic> run(Plan plan) async {
@@ -458,7 +467,13 @@ class NativeGestureExecutor implements Executor {
       );
     }
 
-    return _bridge.dispatchGesture(
+    // Announced only now: past the approval, and only once the gesture target
+    // actually resolved. An event emitted earlier would claim a tool run that
+    // the executor then refused to make.
+    final RiskLevel risk = await _classifyForDisplay(proposal);
+    publish?.call(ToolCallStarted(action, risk.level));
+
+    final dynamic outcome = await _bridge.dispatchGesture(
       proposal: proposal,
       bounds: bounds,
       // True because [ConsentGate] holds no approval for this action any more:
@@ -466,6 +481,24 @@ class NativeGestureExecutor implements Executor {
       // PolicyEngine through `policyGate` before it touches anything.
       confirmed: true,
     );
+    // `executed` is the only field the bridge documents as meaning a gesture
+    // really reached the accessibility service, so it is the only thing allowed
+    // to decide success here.
+    final bool executed = outcome is NativeGestureOutcome && outcome.executed;
+    publish?.call(ToolCallCompleted(action, executed));
+    return outcome;
+  }
+
+  /// The risk level the UI shows, from the same classifier the bridge uses.
+  ///
+  /// Falls back to the highest tier, matching the bridge's own fail-closed
+  /// rule: a classification failure must never look like a low-risk action.
+  Future<RiskLevel> _classifyForDisplay(Map<String, dynamic> proposal) async {
+    try {
+      return await _bridge.riskClassifier.classify(proposal);
+    } catch (_) {
+      return RiskLevel(level: 3);
+    }
   }
 
   /// The screen rectangle of the node the plan named, or of the first node

@@ -191,3 +191,25 @@ Corrected with a scoped substitution so the plan and the implementation now name
 - No worker processes running; no `/tmp/noir-wt-*` worktrees exist. `git branch --no-merged main` still lists only `feature/night-automations`, already shown in the previous heartbeat to be patch-id-equivalent to `main` and therefore not integration work.
 
 No branch was integrated this heartbeat. The one genuinely open item is unchanged and is not closable here: there is still no device or emulator run, so no claim about on-hardware accessibility automation is verified by anything in this repository.
+
+---
+
+## Heartbeat 2026-09-28 (contract events with no emitter)
+
+`FRONTEND_PLAN.md` line 45 sets a two-part rule for every `NoirUiEvent` subtype: "add to `ui_state_contract.dart` + **real runtime emission** + widget consumer. Fail if any event has no consumer (E5)." Nothing tested either half, and the emission half was broadly unmet.
+
+Reading the twelve subtypes in `lib/core/ui_state_contract.dart` against every construction site in `lib/`:
+
+- **`ToolCallStarted` and `ToolCallCompleted`** — declared, and consumed in `command_centre_screen.dart:1155-1158` as the "Using <tool>…" and "<tool> completed." micro-copy. Constructed **nowhere** in `lib/`. That UI could never render, and `_showSkeleton` at `:310`, which is set only by a `ToolCallStarted`, was therefore permanently false.
+- **`CostEstimateResolved`** — consumed by `_UsageRow` ("Responding with <model>"). Also constructed nowhere, so the model line never appeared.
+- **`SideConversationOpened`** — declared, never constructed, and no consumer. Legitimately unimplemented (no feature opens a side conversation), so it is recorded as reserved rather than given a fake emitter.
+
+The three wired events are emitted from the only sites that genuinely know the facts: `NativeGestureExecutor.run` for the tool lifecycle, and `_streamCompletion` for model selection. Emission is deliberately placed *after* approval is consumed and *after* the gesture target resolves, so an event can never claim a run the executor then refused; `ToolCallCompleted`'s success flag reads only `NativeGestureOutcome.executed`, the single field the bridge documents as meaning a gesture reached the service. The risk level shown comes from the same classifier the bridge uses, with the same fail-closed fallback to tier 3.
+
+`test/ui_event_contract_test.dart` now asserts the rule. **The first version of it passed while the bug was still present** — it searched for `ToolCallCompleted(` as a substring, and the widget's `case ToolCallCompleted(` matched, so the dead consumer certified itself as a live emitter. Detection now ignores `case`/`is`/`extends` prefixes and requires an actual construction. Verified by deleting the `ToolCallCompleted` emission: the test then failed with `Actual: ['ToolCallCompleted', 'CostEstimateResolved']`, which is also how the second, previously unnoticed gap surfaced. A gate that cannot fail is not a gate; the first draft was one.
+
+934 → **938 tests**, all passing. `flutter analyze` clean.
+
+**Verified state of `main` at `47c98d3`** (before this change): clean and level with `origin/main`; `flutter analyze` `No issues found`; 934 tests passing; CI run **36390115336** on `47c98d3` `success`. No worker processes, no `/tmp/noir-wt-*` worktrees, `feature/night-automations` still the only unmerged branch and still patch-id-equivalent to `main`.
+
+Still unverified and not closable here: there is no device or emulator run, so nothing in this repository confirms on-hardware behaviour. The three events wired here are asserted by source-reading and by the composition root's own tests, not by an observed UI frame.

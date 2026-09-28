@@ -372,3 +372,10 @@ integrate.
 Still unverified and not closable here: no device or emulator run, so nothing
 here confirms on-hardware behaviour. The new tests assert a real executor
 against a mocked channel, not an observed gesture on a device.
+
+**Delivery, verified after the fact:** commit `34f442f`, pushed to `main`, with
+`git ls-remote` returning `34f442f2bf1459007f5719a4a6c8b835ae493aa3` — equal to
+the local `HEAD`, not merely a successful push. CI run **36405820660** is
+`success` on that exact `headSha`, with all 18 steps green including
+`Assert Android platform tests actually ran`, so the Kotlin suite was proven to
+execute rather than reporting `FROM-CACHE`.

@@ -151,3 +151,25 @@ Two tests added to `test/noir_theme_tokens_test.dart` so this cannot come back:
 This is asserted by reading sources rather than by inspecting widget trees on purpose. A 4px decorative gradient is invisible in a screenshot and would never fail a behavioural test, which is precisely why it survived every run to date: the existing suite was structurally unable to catch an unauthorized *static* gradient. 932 → 934 Dart tests; `flutter analyze` clean on `main` at 564949e plus this change.
 
 The same class of gap is worth naming: this was found by reading `FRONTEND_PLAN.md` against the code, not by a failing test. Green CI was never evidence about the accent's blast radius.
+
+---
+
+## Heartbeat 2026-09-28 (stale branch triage)
+
+`git branch --no-merged main` reported one branch: `feature/night-automations` at `3526863`, a 2,723-line "real scheduled automation subsystem" (54 tests) that reads as substantial unintegrated work. It is not. Two independent checks say its content is already on `main`:
+
+- `git cherry main feature/night-automations` prints `3526863` with a **leading `-`**, which is Git's own patch-id equivalence verdict: the commit's diff is already reachable from `main`, so it was merged in a form Git cannot see as a fast-forward (a squash or rebase merge), not by ancestry.
+- `git diff main feature/night-automations -- lib/automations/automation_service.dart test/automations/automation_service_test.dart` is **empty**. The branch's two substantive files are byte-identical to `main`. The only differences are 13 lines, and they are `main` being *ahead*: two new `AutomationError` codes (`invalidAction`, `invalidRunCount`) and the `automation_scheduler.dart` export.
+
+So the branch is a snapshot from 2026-09-26 that `main` has since passed. Cherry-picking it would be a no-op at best and a revert of the newer error codes at worst.
+
+The trap this exposes is worth recording, because it is the failure mode the delivery rules already warn about from the other side. The readiness gate says "require a real branch commit, an owned-file diff, and supervisor-reproduced tests before integrating" — and this branch passes the first two checks while being worth nothing. Branch count and diff size are not evidence of unmerged work; `git cherry`'s sign and a path-scoped `git diff` are. Had this heartbeat trusted the 2,723-line stat, it would have spent a CI cycle integrating a duplicate.
+
+**Verified state of `main` at `681be55`** (this heartbeat, on the real tree, not from memory):
+
+- `git status --short --branch` — clean, level with `origin/main`.
+- `flutter analyze` — `No issues found`.
+- `flutter test` — **934 tests, all passed** (matches the 932 → 934 count claimed by the previous heartbeat).
+- CI run **36383309875** on `681be5584aee4b33a153cca992bad8d916e328a3` — `success`. The platform-suite guard reports **5 suites, 98 tests run, 0 failures** (up from the 4/77 recorded earlier in this document), so the Kotlin gate is executing and non-vacuous.
+
+No worker processes are running and no `/tmp/noir-wt-*` worktrees exist; the only traces are three stale `flutter analyze` logs from 2026-09-26, all reporting `No issues found`. No branch was integrated this heartbeat, because none carried work that `main` did not already have.

@@ -605,3 +605,36 @@ checkouts.
 This heartbeat integrated nothing and started nothing. Unchanged and still not
 closable from this host: no device or emulator run, so no on-hardware
 accessibility behaviour is confirmed by the repository or by CI.
+
+## Heartbeat 2026-09-28 (CI for 7ba0e04, current main)
+
+`main` is `7ba0e04`, level with `origin/main` (0/0 after fetch), working tree
+clean, one worktree (the main checkout). Its CI run was read from the workflow
+log:
+
+- **CI run 36418854312** on `7ba0e04` — `success`, `Noir CI`.
+- `flutter analyze` — `No issues found!` (9.0s).
+- `flutter test` — `🎉 957 tests passed.`
+- Android platform step — `(cd android && ./gradlew testDebugUnitTest
+  --no-build-cache)` → `BUILD SUCCESSFUL in 20s`, and the vacuous-pass guard
+  printed `Suites: 5`, so the Kotlin suite executed rather than being skipped.
+
+Locally re-measured: `flutter analyze` → `No issues found! (ran in 0.8s)`;
+`flutter test` → `+957: All tests passed!`
+
+**Integration state re-measured.** `git branch --no-merged main` still lists
+only `feature/night-automations`; `git cherry main feature/night-automations`
+prints `- 3526863`, a leading `-`, i.e. that branch's single unique commit is
+already represented in `main` (the `d5c5ea5` work on `lib/automations/` is the
+same subsystem, and `main` additionally carries `automation_scheduler.dart`,
+`lib/data/automation_repository.dart` and `lib/core/automation_wiring.dart`).
+Nothing to merge.
+
+**No workers in flight.** No `opencode`, `flutter`, `dart` or `gradle` process
+is running. The `/tmp/noir-wt-*` entries are stale `.log` files from earlier
+runs, not worktree directories, so the six named branches have no live
+checkouts.
+
+This heartbeat integrated nothing and started nothing. Unchanged and still not
+closable from this host: no device or emulator run, so no on-hardware
+accessibility behaviour is confirmed by the repository or by CI.

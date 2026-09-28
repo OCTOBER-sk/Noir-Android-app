@@ -173,3 +173,21 @@ The trap this exposes is worth recording, because it is the failure mode the del
 - CI run **36383309875** on `681be5584aee4b33a153cca992bad8d916e328a3` — `success`. The platform-suite guard reports **5 suites, 98 tests run, 0 failures** (up from the 4/77 recorded earlier in this document), so the Kotlin gate is executing and non-vacuous.
 
 No worker processes are running and no `/tmp/noir-wt-*` worktrees exist; the only traces are three stale `flutter analyze` logs from 2026-09-26, all reporting `No issues found`. No branch was integrated this heartbeat, because none carried work that `main` did not already have.
+
+---
+
+## Heartbeat 2026-09-28 (plan/code token-name drift)
+
+`FRONTEND_PLAN.md` named the accent token `coolAccent` in four places (lines 21, 33, 41, 55, 62) while the same document's own theme-tweak section (line 7) and the code both call it `rainbowAccent`. `grep -rn coolAccent` over the whole repo returned only those plan lines — zero occurrences in `lib/`, zero in `test/`. The token has never existed under that name; the plan carried a rename that was applied to the code and to one paragraph but not the rest of the document.
+
+Corrected with a scoped substitution so the plan and the implementation now name the same token. No Dart or Kotlin changed, so this cannot affect behaviour; the point is that a spec whose identifiers do not resolve is not checkable. The `noir_theme_tokens_test.dart` confinement test asserts reference *counts* per file, so it would never have caught a misnamed spec — it has no notion of the name, only of how many places consume the token. A doc can drift from the code without any test failing, which is the same class of gap as the two gate gaps closed earlier in this document.
+
+**Verified state of `main` at `520b5d3`** (this heartbeat, on the real tree):
+
+- `git status --short --branch` — clean, level with `origin/main`; `git log origin/main..main` empty.
+- `flutter analyze` — `No issues found`.
+- `flutter test` — **934 tests, all passed** (unchanged, as expected for a Markdown-only change).
+- CI run **36385211332** on `520b5d3` — `success`.
+- No worker processes running; no `/tmp/noir-wt-*` worktrees exist. `git branch --no-merged main` still lists only `feature/night-automations`, already shown in the previous heartbeat to be patch-id-equivalent to `main` and therefore not integration work.
+
+No branch was integrated this heartbeat. The one genuinely open item is unchanged and is not closable here: there is still no device or emulator run, so no claim about on-hardware accessibility automation is verified by anything in this repository.

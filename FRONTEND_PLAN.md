@@ -18,7 +18,7 @@ Based on: `SOURCE_OF_TRUTH_ADDENDUM.md` (V2.2 backend) + `SOURCE_OF_TRUTH_ADDEND
   - Assistant: left-aligned, NO bubble, full-width transparent, action bar (Copy, Regenerate, Save as Fact, Propose Skill, thumbs) — wire `Save as Fact` → A2 Memory; `Propose Skill` → A3 lifecycle.
 - Streaming (`StreamingTokenReceived`): token reveal, blinking caret `▍` (`textMuted`), Stop button replaces Send. Skeleton loader (`surfaceDark2` bars) ONLY before first token (`planning` / `tool_calling` micro-copy from EventBus).
 - Confirmation card (`ConfirmationRequired`): 12px radius, `surfaceDark` bg, 1px `surfaceDark2` border. Shows risk tier (weight only), tool + provenance (`screenContentWasSanitized` flag real from A6a), Confirm (`pureWhite` fill / `pureBlack` text) + Cancel outline. Biometric (`riskLevel >= 2`) on Confirm.
-- Undo toast (`ActionCompletedWithUndoWindow`): `nearBlack` bg, `pureWhite` text, 12px radius, 5s countdown bar (`surfaceDark2` → `coolAccent` tiny fill), Undo button if `reversible`.
+- Undo toast (`ActionCompletedWithUndoWindow`): `nearBlack` bg, `pureWhite` text, 12px radius, 5s countdown bar (`surfaceDark2` → `rainbowAccent` tiny fill), Undo button if `reversible`.
 
 ### D3 — Live Task View (timeline)
 - Real-time from `TaskController` / `EventBus` — NOT separate UI state.
@@ -30,7 +30,7 @@ Based on: `SOURCE_OF_TRUTH_ADDENDUM.md` (V2.2 backend) + `SOURCE_OF_TRUTH_ADDEND
 
 ### D7 — Skill Manager
 - Full-width rows: name, lifecycle label (`candidate`/`validated`/`draft`/`active`/`disabled`/`degraded`/`needs_review`), `textMuted` timestamp.
-- `needs_review`: `textSecondary` weight label + tiny `coolAccent` dot (scannable).
+- `needs_review`: `textSecondary` weight label + tiny `rainbowAccent` dot (scannable).
 - Detail: version history, success/failure counts (plain numbers), Promote/Disable/Delete.
 
 ### D9 — Safety Center
@@ -38,7 +38,7 @@ Based on: `SOURCE_OF_TRUTH_ADDENDUM.md` (V2.2 backend) + `SOURCE_OF_TRUTH_ADDEND
 - Policy toggles: native `Switch`, monochrome-themed (thumb/track use only 7 tokens).
 
 ### D15 — Undo Toast (already exists in `command_centre_screen.dart`)
-- Verify countdown bar uses `coolAccent` sub-fill, text `actionDescription just happened.` + `Undo` / `Irreversible`.
+- Verify countdown bar uses `rainbowAccent` sub-fill, text `actionDescription just happened.` + `Undo` / `Irreversible`.
 
 ## Contract wiring (critical — no ad-hoc UI state)
 - `Stream<NoirUiEvent>` subscription from Agent Runtime → UI.
@@ -52,11 +52,11 @@ Based on: `SOURCE_OF_TRUTH_ADDENDUM.md` (V2.2 backend) + `SOURCE_OF_TRUTH_ADDEND
 - Assert skeleton loader appears before streaming, removed after first token.
 
 ## Not missing anything from V2.3
-- Zero accent colors except single `coolAccent` dot/fill (user-approved deviation).
+- Zero accent colors except single `rainbowAccent` dot/fill (user-approved deviation).
 - Assistant messages = no bubble. User = bubble. Composer = full width - 16px horizontal.
 - Micro-copy sourced from EventBus (`"Reading screen…"`, `"Checking policy…"`, `"Using <tool>…"`, `"Responding with <model>…"`).
 - Disclaimer: Noir-specific (on-device actions) — not ChatGPT copy.
 - No avatar, no illustration.
 
 ## Next step
-Implement D2 full interactive (stream + skeleton + confirmation + action bar), D3 timeline, D6 numbers, D7 rows, D9 list, with `coolAccent` applied minimally. Confirm with user before build.
+Implement D2 full interactive (stream + skeleton + confirmation + action bar), D3 timeline, D6 numbers, D7 rows, D9 list, with `rainbowAccent` applied minimally. Confirm with user before build.

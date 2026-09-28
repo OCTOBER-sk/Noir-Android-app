@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/agent_wiring.dart';
 import '../core/conversation_controller.dart';
 import '../core/mcp_composition.dart';
 import '../core/theme/noir_theme.dart';
@@ -72,6 +73,8 @@ class CommandCentreScreen extends StatefulWidget {
     this.operations,
     this.mcp,
     this.events,
+    this.confirmations,
+    this.onAnswerConfirmation,
     this.onOpenSettings,
   });
 
@@ -118,6 +121,32 @@ class CommandCentreScreen extends StatefulWidget {
   /// states it already has rather than pretending to be live.
   final Stream<NoirUiEvent>? events;
 
+  /// The policy gate's live confirmation requests — the same
+  /// `composition.confirmations` stream `OperationsSheet` is already given, and
+  /// the same `gate.requests` that `runAutomation` mirrors into the
+  /// `ConfirmationRequired` this screen prints as a card.
+  ///
+  /// A `ConfirmationRequired` event carries the action, the risk tier and the
+  /// provenance flag, but not the `PendingConfirmation` that can actually be
+  /// answered. Without this stream the card is a description of a request whose
+  /// only real answer lives on another screen, which is what made the card's own
+  /// controls inert.
+  ///
+  /// Null means no gate is connected to this screen, and the card says so rather
+  /// than rendering a handler that would go nowhere.
+  final Stream<PendingConfirmation>? confirmations;
+
+  /// Answers one outstanding request. This is the whole consent path, and the
+  /// only call that can approve a gated action: `main.dart` installs a handler
+  /// that forwards to `PendingConfirmation.answer`.
+  ///
+  /// Null means nothing is connected. A null handler must never be replaced by a
+  /// local one — a fabricated handler would be a consent path with no gate behind
+  /// it — so the card keeps its explicitly disabled rendering and says where the
+  /// request is answered instead.
+  final void Function(PendingConfirmation confirmation, bool approved)?
+  onAnswerConfirmation;
+
   /// Opens the screen where a provider, its base URL and its API key are
   /// configured. Null renders no settings control, rather than a button that
   /// goes nowhere.
@@ -157,6 +186,14 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
   late AccessibilityStatusController _accessibility;
   StreamSubscription<NoirUiEvent>? _events;
 
+  /// The gate's confirmation requests. Deliberately its own field, not [_events]:
+  /// that one is the conversation controller's stream and [_bindEvents] uses
+  /// [_busEvents] for the same reason.
+  StreamSubscription<PendingConfirmation>? _confirmations;
+
+  /// The one request the gate is still waiting on, while it is waiting on one.
+  PendingConfirmation? _pending;
+
   /// The live subscription to the injected assistant backend, while one is
   /// running. Cancelled on stop, on failure, and on unmount.
   StreamSubscription<String>? _replySubscription;
@@ -173,6 +210,7 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
     _bindController(widget.controller, owns: widget.controller == null);
     _bindAccessibility(widget.bridge);
     _bindEvents(widget.events);
+    _bindConfirmations();
   }
 
   /// Subscription to the injected real event bus.
@@ -193,6 +231,35 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
     _busEvents = events.listen(pushRealEvent);
   }
 
+  /// Subscribes to the policy gate's requests and holds the outstanding one.
+  ///
+  /// Same rule as `_OperationsSheetState._bindConfirmations`: a request this
+  /// screen stops showing has been superseded, and a superseded request is a
+  /// refusal rather than a silent drop. Answering it is safe to do from two
+  /// holders at once because `PendingConfirmation.answer` is first-answer-wins
+  /// and returns false once anything has answered — a stale refusal here cannot
+  /// cancel a request the Operations sheet is legitimately showing.
+  void _bindConfirmations() {
+    unawaited(_confirmations?.cancel());
+    _confirmations = null;
+    final PendingConfirmation? stale = _pending;
+    _pending = null;
+    stale?.answer(false);
+    final Stream<PendingConfirmation>? source = widget.confirmations;
+    if (source == null) return;
+    _confirmations = source.listen(
+      (PendingConfirmation confirmation) {
+        if (!mounted) return;
+        setState(() => _pending = confirmation);
+      },
+      onError: (Object _) {
+        // The gate's stream does not fail. If it ever did, the honest state is
+        // "no request is outstanding", which is what this restores.
+        if (mounted) setState(() => _pending = null);
+      },
+    );
+  }
+
   @override
   void didUpdateWidget(CommandCentreScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -202,6 +269,9 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
     }
     if (!identical(oldWidget.events, widget.events)) {
       _bindEvents(widget.events);
+    }
+    if (!identical(oldWidget.confirmations, widget.confirmations)) {
+      _bindConfirmations();
     }
     if (identical(oldWidget.controller, widget.controller)) {
       return;
@@ -222,6 +292,8 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
     _unbindAccessibility();
     unawaited(_busEvents?.cancel());
     _busEvents = null;
+    unawaited(_confirmations?.cancel());
+    _confirmations = null;
     _composer.dispose();
     _composerFocus.dispose();
     _scroll.dispose();
@@ -295,6 +367,22 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
       return;
     }
     _timeline.add(_MessageItem(messageId));
+  }
+
+  /// Answers the request this screen holds and stops offering it.
+  ///
+  /// The request itself is only released by the injected handler, which is
+  /// `PendingConfirmation.answer` in production. This method never approves
+  /// anything by itself and never relaxes the gate; with no handler connected
+  /// it does nothing at all, which is why the card renders disabled in that
+  /// case.
+  void _answerConfirmation(bool approved) {
+    final void Function(PendingConfirmation, bool)? handler =
+        widget.onAnswerConfirmation;
+    final PendingConfirmation? outstanding = _pending;
+    if (handler == null || outstanding == null) return;
+    handler(outstanding, approved);
+    if (mounted) setState(() => _pending = null);
   }
 
   /// Receives REAL events from AgentRuntime (not invented).
@@ -562,7 +650,17 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
       return _ConversationRow(message: message, loaderAnimation: _loaderAnim);
     }
     if (item is _PipelineEventItem) {
-      return _MessageRow(event: item.event);
+      // Every confirmation card on the timeline is offered the one outstanding
+      // request. Only the first answer reaches the gate — `answer` is
+      // first-answer-wins — and a card for a request that is already released
+      // renders itself disabled, so a stale row cannot take a decision.
+      return _MessageRow(
+        event: item.event,
+        confirmation: _pending,
+        onAnswer: widget.onAnswerConfirmation == null
+            ? null
+            : _answerConfirmation,
+      );
     }
     if (item is _SystemNoteItem) {
       return _MicroCopyLine(text: item.text);
@@ -1152,9 +1250,20 @@ class _AssistantMessageRow extends StatelessWidget {
 
 /// Each message row binds to a REAL NoirUiEvent subtype — never fabricated.
 class _MessageRow extends StatelessWidget {
-  const _MessageRow({required this.event});
+  const _MessageRow({
+    required this.event,
+    required this.confirmation,
+    required this.onAnswer,
+  });
 
   final NoirUiEvent event;
+
+  /// The gate's outstanding request, handed to a confirmation card so the card
+  /// can offer the answer rather than describe it.
+  final PendingConfirmation? confirmation;
+
+  /// Null means no consent path is connected to this screen.
+  final void Function(bool approved)? onAnswer;
 
   @override
   Widget build(BuildContext context) {
@@ -1168,7 +1277,11 @@ class _MessageRow extends StatelessWidget {
       case ToolCallCompleted(:final toolName):
         return _MicroCopyLine(text: '$toolName completed.');
       case ConfirmationRequired():
-        return _ConfirmationCard(event: event);
+        return _ConfirmationCard(
+          event: event,
+          confirmation: confirmation,
+          onAnswer: onAnswer,
+        );
       case ActionCompletedWithUndoWindow():
         return UndoToast(event: event);
       case CostEstimateResolved():
@@ -1308,12 +1421,70 @@ class _UsageRow extends StatelessWidget {
   }
 }
 
-/// Confirmation card — the policy gate is not wired yet, so both controls are
-/// rendered explicitly disabled instead of as dead, tappable-looking buttons.
+/// Confirmation card — the timeline's record of the gate's outstanding request,
+/// and where the answer is given.
+///
+/// This is the screen the user is already looking at when a gated run starts,
+/// so both answers are offered here and they reach the same
+/// [PendingConfirmation] the Operations sheet would have answered. Two holders
+/// of one request is safe: [PendingConfirmation.answer] is first-answer-wins
+/// and returns false once anything has answered, and the enabled state below is
+/// derived from the request itself rather than left to that guarantee.
 class _ConfirmationCard extends StatelessWidget {
-  const _ConfirmationCard({required this.event});
+  const _ConfirmationCard({
+    required this.event,
+    required this.confirmation,
+    required this.onAnswer,
+  });
 
   final ConfirmationRequired event;
+
+  /// The gate's outstanding request, while one is outstanding. Null means the
+  /// gate has published nothing this card could answer.
+  final PendingConfirmation? confirmation;
+
+  /// Answers the held request. Null means no consent path is connected to this
+  /// screen at all, and the card says so rather than pretending otherwise.
+  final void Function(bool approved)? onAnswer;
+
+  /// Whether either answer may be given right now.
+  ///
+  /// A request the gate has already released — answered by the other holder, or
+  /// expired into a refusal — is never answerable here, and neither is anything
+  /// at all while [onAnswer] is null.
+  ///
+  /// This is read from the request on every build, so it is as fresh as the last
+  /// rebuild and no fresher: an answer given on the Operations sheet does not
+  /// notify this screen, and a real gated run always emits something afterwards
+  /// that does. What makes the window harmless is not this getter but
+  /// [PendingConfirmation.answer], which returns false once anything has
+  /// answered — so a stale card cannot approve, whatever it looks like.
+  bool get _answerable =>
+      onAnswer != null && confirmation != null && !confirmation!.isAnswered;
+
+  /// What the card can honestly say about this request's consent.
+  ///
+  /// Every branch is true in both the wired and the unwired build; the previous
+  /// copy ("no policy gate is wired to this card yet") was false in both.
+  String get _consentNote {
+    final PendingConfirmation? pending = confirmation;
+    if (pending == null) {
+      return onAnswer == null
+          ? 'This card cannot answer it. A gated request is answered in '
+                'Operations.'
+          : 'No confirmation request is outstanding for this card.';
+    }
+    if (pending.isAnswered) {
+      return pending.answerValue == true
+          ? 'This request was answered: approved once.'
+          : 'This request was answered: refused or expired, so nothing runs.';
+    }
+    if (!pending.canBeApproved) {
+      return 'This needs a biometric check, which this build cannot perform, so '
+          'it cannot be confirmed here. Cancel it, or let it expire.';
+    }
+    return 'Answering here answers the request the policy gate is waiting on.';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1373,18 +1544,36 @@ class _ConfirmationCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _CardActionButton(label: 'Confirm', filled: true),
+                child: _CardActionButton(
+                  buttonKey: const Key('confirmation-card-confirm'),
+                  label: 'Confirm',
+                  filled: true,
+                  // Inert for a biometric-demanding action: this build has no
+                  // biometric binding, so a tap could only ever be a refusal.
+                  // A control that looks live and cannot be is the most
+                  // expensive lie in a consent prompt.
+                  enabled: _answerable && confirmation!.canBeApproved,
+                  onTap: _answerable && confirmation!.canBeApproved
+                      ? () => onAnswer!(true)
+                      : null,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _CardActionButton(label: 'Cancel', filled: false),
+                child: _CardActionButton(
+                  buttonKey: const Key('confirmation-card-cancel'),
+                  label: 'Cancel',
+                  filled: false,
+                  enabled: _answerable,
+                  onTap: _answerable ? () => onAnswer!(false) : null,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Disabled: no policy gate is wired to this card yet.',
-            style: TextStyle(
+          Text(
+            _consentNote,
+            style: const TextStyle(
               color: Color(0xFF5A5A5A),
               fontSize: 11,
               fontStyle: FontStyle.italic,
@@ -1412,32 +1601,79 @@ class _ConfirmationCard extends StatelessWidget {
 }
 
 /// Card action that is either wired to a real handler or visibly disabled.
+///
+/// [onTap] null is the disabled state, and it is drawn as one: a control that
+/// looks live and cannot be is the most expensive lie in a consent prompt. The
+/// live and disabled paints differ only in grey weight, per V2.3 — no accent.
 class _CardActionButton extends StatelessWidget {
-  const _CardActionButton({required this.label, required this.filled});
+  const _CardActionButton({
+    required this.label,
+    required this.filled,
+    required this.enabled,
+    this.onTap,
+    this.buttonKey,
+  });
 
   final String label;
+
+  /// The filled variant (Confirm) and the outline variant (Cancel), as
+  /// FRONTEND_PLAN.md specifies for this card.
   final bool filled;
+
+  /// Whether this control can be pressed. False renders the disabled box and
+  /// installs no gesture recogniser, so a tap lands on nothing.
+  final bool enabled;
+
+  /// The real action. Null whenever [enabled] is false.
+  final VoidCallback? onTap;
+
+  /// Identifies the control's semantics node, which is what the button actually
+  /// is: the painted box below it carries no gesture of its own.
+  final Key? buttonKey;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
+      key: buttonKey,
+      container: true,
       button: true,
-      enabled: false,
+      enabled: enabled,
       label: label,
-      child: Container(
-        height: 40,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Colors.transparent,
-          border: Border.all(color: const Color(0xFF3A3A3A), width: 1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: const Color(0xFF5A5A5A),
-            fontSize: 14,
-            fontWeight: filled ? FontWeight.w700 : FontWeight.w500,
+      onTap: enabled ? onTap : null,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? onTap : null,
+        child: Container(
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            // Only a live filled button paints a fill; the outline variant keeps
+            // the card's own surface behind it, which is why its label stays
+            // light. Black-on-transparent is unreadable on this background.
+            color: filled && enabled
+                ? const Color(0xFFFFFFFF)
+                : Colors.transparent,
+            border: Border.all(
+              color: !enabled
+                  ? const Color(0xFF3A3A3A)
+                  : filled
+                  ? const Color(0xFFFFFFFF)
+                  : const Color(0xFFB0B0B0),
+              width: 1,
+            ),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: !enabled
+                  ? const Color(0xFF5A5A5A)
+                  : filled
+                  ? const Color(0xFF000000)
+                  : const Color(0xFFB0B0B0),
+              fontSize: 14,
+              fontWeight: filled ? FontWeight.w700 : FontWeight.w500,
+            ),
           ),
         ),
       ),

@@ -206,6 +206,20 @@ class _SplashScreenState extends State<SplashScreen> {
   /// brought with it.
   Widget _buildApp() {
     final NoirComposition composition = widget.composition;
+    // One function, two screens. The Command Centre's confirmation card and the
+    // Operations sheet's prompt are the same question asked of the same gate, so
+    // they must reach `PendingConfirmation.answer` through one implementation —
+    // two copies of this lambda would eventually disagree about what consenting
+    // means, and one of them would be the copy nobody re-reads.
+    void answerConfirmation(
+      PendingConfirmation confirmation,
+      bool approved,
+    ) {
+      // The gate holds the pending request; answering it here is the whole
+      // consent path, and the only call that can approve a gated action.
+      confirmation.answer(approved);
+    }
+
     return CommandCentreScreen(
       controller: composition.conversation,
       usage: composition.usage,
@@ -217,18 +231,19 @@ class _SplashScreenState extends State<SplashScreen> {
       // screen had the renderer but no source, so the graph could emit real
       // events and the screen still showed none of them.
       events: composition.taskRun.events,
+      // The policy gate's own request stream and the answer that releases it.
+      // The card the user is already looking at when a gated run starts used to
+      // print two dead buttons and claim no gate was wired, so the only route to
+      // consent was to leave this screen and find the Operations sheet.
+      confirmations: composition.confirmations,
+      onAnswerConfirmation: answerConfirmation,
       operations: OperationsSheet(
         bridge: composition.bridge,
         taskTimeline: composition.taskTimeline(),
         usage: composition.usageStates(),
         skills: composition.skills(),
         confirmations: composition.confirmations,
-        onAnswerConfirmation:
-            (PendingConfirmation confirmation, bool approved) {
-              // The gate holds the pending request and the sheet is its only
-              // holder; answering it here is the whole consent path.
-              confirmation.answer(approved);
-            },
+        onAnswerConfirmation: answerConfirmation,
         onRun: (AutomationRequest request) async {
           await composition.runAutomation(request);
         },

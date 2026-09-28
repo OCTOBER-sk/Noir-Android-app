@@ -213,3 +213,20 @@ The three wired events are emitted from the only sites that genuinely know the f
 **Verified state of `main` at `47c98d3`** (before this change): clean and level with `origin/main`; `flutter analyze` `No issues found`; 934 tests passing; CI run **36390115336** on `47c98d3` `success`. No worker processes, no `/tmp/noir-wt-*` worktrees, `feature/night-automations` still the only unmerged branch and still patch-id-equivalent to `main`.
 
 Still unverified and not closable here: there is no device or emulator run, so nothing in this repository confirms on-hardware behaviour. The three events wired here are asserted by source-reading and by the composition root's own tests, not by an observed UI frame.
+
+---
+
+## Heartbeat 2026-09-28 (post-push verification of 9433aa6)
+
+The previous heartbeat wrote its section but recorded the pre-change state, so the 938-test claim and the new emissions were unverified by an independent run at the time. This heartbeat runs them.
+
+**Verified state of `main` at `9433aa6`** (this heartbeat, on the real tree):
+
+- `git status --short --branch` — clean, level with `origin/main`; `git rev-list --count origin/main..main` = 0.
+- `flutter analyze` — `No issues found! (ran in 1.0s)`.
+- `flutter test` — **938 tests, all passed**. This confirms the 934 → 938 delta the previous heartbeat attributed to `test/ui_event_contract_test.dart`; the count matches its claim exactly rather than approximately.
+- CI run **36398847802** on `9433aa6` — `success`, 3m23s. The platform guard reports **Suites: 5, 98 run, 0 failures, 0 errors**, so the Kotlin gate is still executing and non-vacuous.
+- No worker processes running. The three `/tmp/noir-wt-*` paths are stale `flutter analyze` logs dated 2026-09-26, not worktrees — `git worktree list` shows only the main checkout. Nothing is mid-flight.
+- `git branch --no-merged main` still lists only `feature/night-automations` at `3526863`. Re-checked rather than assumed: `git diff 3526863 main -- lib/automations test/automations` shows only `main` being *ahead* (the `automation_scheduler.dart` export, `invalidAction`, `invalidRunCount`, plus the 436-line scheduler and its tests). Nothing on the branch is missing from `main`, so there is still nothing to integrate.
+
+One thing this heartbeat did not do: it did not verify the *emission sites* by hand. The new test is a source-reading gate, so "938 pass" confirms the contract test still catches a removed emission — it does not independently confirm that `ToolCallStarted` fires at a moment when the Command Centre's rows will actually render. That remains a read-the-code judgement, and it is recorded as one.

@@ -139,19 +139,25 @@ jobs:
       # so a green step alone cannot distinguish "914 lines of JUnit passed" from
       # "no test was ever discovered". Count the JUnit XML results and fail loudly
       # on an empty or absent report so the gate cannot pass vacuously.
+      #
+      # android/build.gradle sets rootProject.buildDir = '../build', so the app
+      # module's results land in <repo>/build/app, NOT android/app/build. The
+      # lookup below stays tolerant of a relocated build directory rather than
+      # encoding today's path as if it were fixed.
       - name: Assert Android platform tests actually ran
         run: |
           set -euo pipefail
-          reports="android/app/build/test-results/testDebugUnitTest"
-          if [ ! -d "$reports" ]; then
-            echo "::error::no JUnit report at $reports — the platform suite did not run"
+          reports="$(dirname "$(find build -type d -name testDebugUnitTest -path '*test-results*' 2>/dev/null | head -1)")"
+          if [ -z "$reports" ] || [ ! -d "$reports" ]; then
+            echo "::error::no JUnit report found — the platform suite did not run"
             exit 1
           fi
           total="$(grep -ho 'tests="[0-9]*"' "$reports"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)"
           failures="$(grep -ho 'failures="[0-9]*"' "$reports"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)"
           errors="$(grep -ho 'errors="[0-9]*"' "$reports"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)"
-          echo "Android platform unit tests: ${total} run, ${failures} failures, ${errors} errors"
+          echo "Report dir: $reports"
           echo "Suites: $(ls "$reports"/*.xml | wc -l)"
+          echo "Android platform unit tests: ${total} run, ${failures} failures, ${errors} errors"
           if [ "${total:-0}" -eq 0 ]; then
             echo "::error::the platform suite reported 0 tests — refusing a vacuous pass"
             exit 1

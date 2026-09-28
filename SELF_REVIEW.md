@@ -379,3 +379,94 @@ the local `HEAD`, not merely a successful push. CI run **36405820660** is
 `success` on that exact `headSha`, with all 18 steps green including
 `Assert Android platform tests actually ran`, so the Kotlin suite was proven to
 execute rather than reporting `FROM-CACHE`.
+
+---
+
+## Heartbeat 2026-09-28 (the confirmation card was a picture of a consent control)
+
+The three previous heartbeats each made a `NoirUiEvent` reachable. This one read
+what happens *after* an event arrives, and the answer was that the most
+consequential consumer in the app was inert.
+
+`CommandCentreScreen` renders `_ConfirmationCard` for every
+`ConfirmationRequired` on the timeline (`command_centre_screen.dart:1170`). That
+card drew Confirm and Cancel through `_CardActionButton`, which hardcoded
+`enabled: false` and rendered a plain `Container` — no `onTap` anywhere in the
+tree. Underneath it printed, verbatim:
+
+> Disabled: no policy gate is wired to this card yet.
+
+**That sentence was false, and the reason it was false is the defect.** The gate
+is wired and live in production: `main.dart:225` passes
+`confirmations: composition.confirmations` into `OperationsSheet`,
+`main.dart:226-231` passes a handler that calls `confirmation.answer(approved)`,
+`composition_root.dart:678` is `gate.requests`, and `runAutomation`
+(`:1380-1394`) mirrors every gate request into the very `ConfirmationRequired`
+this card renders. `OperationsSheet._ConfirmationPrompt` already did the whole
+job correctly.
+
+So the user was looking at a confirmation with two dead buttons *while the
+request was genuinely waiting on them*, and the only working answer was on
+another screen they had to go and find. `FRONTEND_PLAN.md:20` requires working
+`Confirm` + `Cancel` on this card, and the card is the timeline's own record of
+the request, so the timeline is where the answer belongs. The cost of the
+previous heartbeats' work is the point: wiring `ConfirmationRequired` is what
+made this card reachable, and reachable-but-inert is worse than unreachable
+because it now looks like the app is waiting on the user when it is not.
+
+**One consent path, implemented once.** The screen takes the same
+`gate.requests` stream and the same answer handler `OperationsSheet` already
+receives, held the outstanding `PendingConfirmation`, and releases it through
+`PendingConfirmation.answer` — the only call that can approve a gated action.
+`main.dart` now builds one local `answerConfirmation` function and hands it to
+both screens, so two copies of the consent lambda cannot drift.
+
+Two screens holding one request is safe for the reason the class already
+guarantees: `answer` is first-answer-wins and returns `false` once anything has
+answered, so a stale-refusal on rebind cannot cancel a request the other holder
+is legitimately showing. The enabled state is *derived* from `isAnswered` and
+`canBeApproved` rather than left to that guarantee, so a released request and a
+biometric-demanding one both render disabled — a control that looks live and
+cannot be is the most expensive lie in a consent prompt.
+
+The false copy is gone. Each state now says something true: where the request is
+answered when nothing is connected, that no request is outstanding, that it was
+approved once, that it was refused or expired, or that a biometric check is
+required and this build cannot perform one.
+
+**RED, verified by the supervisor rather than taken on report.** I reproduced it
+independently: setting `_answerable => false` in the worktree, the new file gives
+`00:02 +4 -7: Some tests failed` — 7 of the 11 fail, and the 4 that pass are
+exactly the controls (the card's own fields render, both controls are disabled
+with nothing connected). Restored, the file is `00:01 +11: All tests passed!`.
+The gate discriminates; it is not failing for an incidental reason.
+
+`test/ui/command_centre_confirmation_card_test.dart` drives the real screen over
+the injected wires `main.dart` uses, and asserts the answer twice on purpose:
+once as a spy on the callback, once as `confirmation.answerValue` on the real
+`PendingConfirmation`. A callback spy alone would pass against a handler that
+took the argument and threw it away — the same failure the dead buttons had.
+
+`flutter analyze` — `No issues found!`. `flutter test` — **957 tests, all passed**
+(946 → 957, exactly the eleven new ones; the baseline was measured on the
+unmodified worktree before any edit).
+
+Still unverified and not closable here: there is no device or emulator run, so
+nothing here confirms on-hardware behaviour. The button's hit target, the white
+fill's contrast on the `0xFF1A1A1A` card, and what a screen reader announces are
+reasoned from the code and asserted in a widget test, not observed.
+
+Two limitations recorded rather than hidden, both a consequence of
+`ConfirmationRequired` carrying no `requestId`:
+
+* `PendingConfirmation` is not a `Listenable`, so an answer given on the
+  Operations sheet does not notify the Command Centre. The card re-derives on
+  every build and a gated run always emits something after the decision, so the
+  window is short — and what actually holds the line is `answer` itself: a tap on
+  a stale card cannot approve anything. `OperationsSheet._ConfirmationPrompt` has
+  the same window and is strictly looser, since it checks only `canBeApproved`.
+* If the timeline holds several `ConfirmationRequired` rows, each is offered the
+  same outstanding request. First-answer-wins makes this safe rather than wrong,
+  and a released request renders disabled everywhere, but it is a visual
+  duplication. Closing it properly needs per-event correlation the event type
+  does not carry, and inventing that correlation was the larger risk.

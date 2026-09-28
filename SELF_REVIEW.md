@@ -298,3 +298,77 @@ only unmerged branch and remains patch-id-equivalent to `main`: the diff against
 Still unverified and not closable here: there is no device or emulator run, so
 nothing in this repository confirms on-hardware behaviour. This fix is asserted
 by a widget test over the real event wire, not by an observed frame on a device.
+
+---
+
+## Heartbeat 2026-09-28 (a refuted defect, and the gap that was real underneath it)
+
+The previous heartbeat closed the open CI question: run **36401778033**
+(`0d4fb30`) came back `cancelled`, not green and not red — it was superseded
+41 seconds later by run **36401955194** on `77d6330`, which is `success` with
+every step green, including `Assert Android platform tests actually ran`. So the
+skeleton-loader fix is covered by a completed run; the cancellation was a
+superseded duplicate, not a failure.
+
+This heartbeat then went looking for a defect one level below that fix, and
+**found none**. The hypothesis was that the emission pair in
+`NativeGestureExecutor.run` is not exception-safe:
+
+```
+lib/core/agent_wiring.dart:474  publish?.call(ToolCallStarted(...));
+lib/core/agent_wiring.dart:476  final outcome = await _bridge.dispatchGesture(...)
+lib/core/agent_wiring.dart:488  publish?.call(ToolCallCompleted(...));
+```
+
+`dispatchGesture` catches only `MissingPluginException` and `PlatformException`,
+so any other throw would skip line 488 and leave the Command Centre's loader
+spinning — the same symptom the previous heartbeat just fixed, on a path its
+widget test cannot reach. That test pushes events into the screen by hand and
+never runs the executor.
+
+**It cannot happen.** Probed directly against the real `NativeBridge`, both of
+these came back as a blocked `NativeGestureOutcome` rather than an escaping
+throw: a mock handler throwing a raw `StateError`, and a reply whose map has
+non-string keys (so `invokeMapMethod<String, dynamic>` cannot cast it). The
+`MethodChannel` normalises platform-side failures to `PlatformException` before
+the Dart caller sees them, which is exactly the class the bridge already
+catches. The only statement left between the two publishes is
+`outcome.executed`, and the sink is guarded — `NoirTaskRun.emit` checks
+`_events.isClosed`. **No production change was made, because there is no defect
+to fix.** `git diff` against `77d6330` is empty for `lib/`.
+
+**What was real is the coverage gap underneath the hypothesis.** Nothing ran
+`NativeGestureExecutor`. The Command Centre test supplies events by hand, and
+`test/ui_event_contract_test.dart` is a source-reading gate. So if the executor
+stopped publishing `ToolCallCompleted` altogether, every existing test would
+still pass and the loader would spin forever.
+
+`test/ui/tool_call_completion_emission_test.dart` (4 tests) closes that by
+driving the real executor against a mocked platform channel, with a real
+`ConsentGate` approval granted through the gate's own `requests` stream rather
+than by reaching into its private map. It pins four honest outcomes: dispatched
+(→ completed, success), platform refusal (→ completed, failure), platform error
+(→ completed, failure, no escaping throw), and refused-before-dispatch (→ no
+events at all, so a run that never happened is not claimed).
+
+**The RED run, because a gate that cannot fail is not a gate:** with
+`publish?.call(ToolCallCompleted(...))` temporarily disabled at line 488, 3 of
+the 4 failed, and — the point of the exercise — `test/ui_event_contract_test.dart`
+stayed **green (4 passed)** through the same break. The existing contract gate
+never covered the runtime emitter, which is exactly why this file was worth
+adding. The break was reverted; `lib/` is unmodified.
+
+`flutter analyze` — `No issues found!`. `flutter test` — **946 tests, all
+passed** (942 → 946, exactly the four new ones).
+
+**Verified state of `main` at `77d6330`**: clean and level with `origin/main`;
+`git worktree list` shows only the main checkout and no worker processes are
+running, so there is no delegated work in flight. `feature/night-automations`
+remains the only unmerged branch and remains fully contained: `git diff main
+3526863 -- lib/automations test/automations` shows only deletions, i.e. the
+branch is `main` minus the scheduler, with nothing branch-only. Nothing to
+integrate.
+
+Still unverified and not closable here: no device or emulator run, so nothing
+here confirms on-hardware behaviour. The new tests assert a real executor
+against a mocked channel, not an observed gesture on a device.

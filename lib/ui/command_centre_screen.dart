@@ -310,7 +310,15 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
       if (event is ToolCallStarted) {
         _showSkeleton = true;
       }
-      if (event is ActionCompletedWithUndoWindow) {
+      // `ToolCallCompleted` is the event that actually ends a tool call. The
+      // undo window is not a substitute for it: `AgentRuntimePipeline` awaits
+      // `undoWindow.open(5, ...)` *before* `execute.run(plan)`, so on a real run
+      // `ActionCompletedWithUndoWindow` has already arrived by the time the tool
+      // starts. Clearing only on that event left the loader spinning for the
+      // rest of the session. Both are kept: a completed tool call stops the
+      // loader, and the undo window still does too for the paths that never
+      // reach a tool.
+      if (event is ToolCallCompleted || event is ActionCompletedWithUndoWindow) {
         _showSkeleton = false;
       }
     });
@@ -535,7 +543,10 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
       itemCount: _timeline.length + (_showSkeleton ? 1 : 0),
       itemBuilder: (context, index) {
         if (index == _timeline.length) {
-          return _SkeletonLoader(animation: _loaderAnim);
+          return _SkeletonLoader(
+            key: const Key('command-centre-skeleton'),
+            animation: _loaderAnim,
+          );
         }
         return _buildTimelineRow(_timeline[index]);
       },
@@ -995,7 +1006,7 @@ LinearGradient _cyclingAccent(Animation<double> animation) {
 
 /// Animated skeleton loader with smooth rainbow gradient tip — real contract-bound.
 class _SkeletonLoader extends StatelessWidget {
-  const _SkeletonLoader({required this.animation});
+  const _SkeletonLoader({required this.animation, super.key});
 
   final AnimationController animation;
 

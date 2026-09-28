@@ -132,8 +132,13 @@ jobs:
       # the tree but are never executed by any gate. The helpers under test
       # import no android.* class, so this needs no device and no emulator —
       # only the Android SDK the previous step already proved is present.
+      #
+      # --no-build-cache is required, not cosmetic: gradle/actions/setup-gradle
+      # enables the build cache, and on a repeat run the task reports
+      # "testDebugUnitTest FROM-CACHE" and writes no JUnit XML, which would make
+      # the assertion below fail on a suite that had genuinely already passed.
       - name: Run Android platform unit tests
-        run: (cd android && ./gradlew testDebugUnitTest)
+        run: (cd android && ./gradlew testDebugUnitTest --no-build-cache)
 
       # `testDebugUnitTest` exits 0 when the source set compiles to zero tests,
       # so a green step alone cannot distinguish "914 lines of JUnit passed" from

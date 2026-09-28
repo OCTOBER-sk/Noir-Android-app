@@ -10,8 +10,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../core/theme/noir_theme.dart';
-
 /// Placeholder for a figure the source has not reported. A dash says "unknown";
 /// a zero would say "nothing happened", which is a different claim.
 const String kUsageUnknownFigure = '—';
@@ -295,20 +293,6 @@ class _SnapshotBody extends StatelessWidget {
             color: Color(0xFF5A5A5A),
             fontSize: 11,
             fontWeight: FontWeight.w300,
-          ),
-        ),
-        const SizedBox(height: 18),
-        // Rainbow-shifting tiny indicator
-        Container(
-          height: 4,
-          width: 60,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: NoirColors.rainbowAccent,
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-            ),
-            borderRadius: BorderRadius.circular(2),
           ),
         ),
       ],

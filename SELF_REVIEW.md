@@ -136,3 +136,18 @@ One behavioural asymmetry surfaced while doing this and is worth a decision rath
 **Resolved (2026-09-28) — Dart now widens, the same way Kotlin does.** The direction is not a coin flip: this is the reply Kotlin *sends back* over the same standard MethodChannel codec, so the codec's own Int/Long/Double interchangeability applies identically in both directions, and the reason Kotlin widens applies to Dart for the same reason. `NativeGateVerdict.fromChannelMap` now accepts any integral `num` and narrows with `toInt()`, refusing a non-integral Double, a non-numeric value, `null`, `NaN` and the infinities — so the accepted width widens without any non-integer ever being accepted. `allowed` is untouched and still requires a strict `Boolean`; it remains the only field a gesture depends on, and a test now pins that a widened `riskLevel` did not relax it. Four tests were added in `test/native_bridge_test.dart` (932 Dart tests, up from 928; `flutter analyze` clean). The Kotlin side is unchanged, so the two decoders now agree rather than one having been relaxed toward the other.
 
 One caveat that is genuinely still open and is *not* covered above: there is no real-device or emulator run. Every claim here rests on `flutter test` and `flutter analyze`; no assertion in this document has been observed executing Android accessibility automation on hardware.
+
+---
+
+## Heartbeat 2026-09-28 (accent conformance)
+
+A fourth `NoirColors.rainbowAccent` call site existed at `usage_dashboard_screen.dart:301` — a 60x4 decorative gradient bar under the "Reported at …" line in the D6 usage snapshot. `FRONTEND_PLAN.md` authorizes the accent on exactly three spots ("Stream loader bar tip, Undo countdown fill, `needs_review` label dot"), so this was the documented deviation having quietly widened. It was also the one non-animated bar in the codebase, which contradicted the existing test's own comment that the accent "is only ever consumed as an animated gradient" — a claim nothing had verified. Removed, along with the import it left unused (caught by `flutter analyze`, not by eye).
+
+Two tests added to `test/noir_theme_tokens_test.dart` so this cannot come back:
+
+- **Confinement** — scans every `.dart` file under `lib/` and asserts the token's per-file reference count equals an exact map. A new call site fails the test whether it is a fourth spot or a duplicate. Counts are references, not painted instances: `command_centre_screen.dart` holds 1 (the `_cyclingAccent` helper, which paints twice) and `skill_manager_screen.dart` holds 1 (the static `needs_review` dot). The test failed on first run with 1-where-2-expected and was corrected against the real source rather than by loosening the assertion.
+- **Animation** — the two meaning-bearing bars must paint through `_cyclingAccent` (exactly 2 call sites), and `command_centre_screen.dart` must contain no raw `colors: NoirColors.rainbowAccent`. The `needs_review` dot is the one legitimate static use: it is an 8px scannable marker, and animating it would make it distract.
+
+This is asserted by reading sources rather than by inspecting widget trees on purpose. A 4px decorative gradient is invisible in a screenshot and would never fail a behavioural test, which is precisely why it survived every run to date: the existing suite was structurally unable to catch an unauthorized *static* gradient. 932 → 934 Dart tests; `flutter analyze` clean on `main` at 564949e plus this change.
+
+The same class of gap is worth naming: this was found by reading `FRONTEND_PLAN.md` against the code, not by a failing test. Green CI was never evidence about the accent's blast radius.

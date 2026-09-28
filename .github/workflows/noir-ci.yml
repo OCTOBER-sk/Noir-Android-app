@@ -134,3 +134,25 @@ jobs:
       # only the Android SDK the previous step already proved is present.
       - name: Run Android platform unit tests
         run: (cd android && ./gradlew testDebugUnitTest)
+
+      # `testDebugUnitTest` exits 0 when the source set compiles to zero tests,
+      # so a green step alone cannot distinguish "914 lines of JUnit passed" from
+      # "no test was ever discovered". Count the JUnit XML results and fail loudly
+      # on an empty or absent report so the gate cannot pass vacuously.
+      - name: Assert Android platform tests actually ran
+        run: |
+          set -euo pipefail
+          reports="android/app/build/test-results/testDebugUnitTest"
+          if [ ! -d "$reports" ]; then
+            echo "::error::no JUnit report at $reports — the platform suite did not run"
+            exit 1
+          fi
+          total="$(grep -ho 'tests="[0-9]*"' "$reports"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)"
+          failures="$(grep -ho 'failures="[0-9]*"' "$reports"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)"
+          errors="$(grep -ho 'errors="[0-9]*"' "$reports"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)"
+          echo "Android platform unit tests: ${total} run, ${failures} failures, ${errors} errors"
+          echo "Suites: $(ls "$reports"/*.xml | wc -l)"
+          if [ "${total:-0}" -eq 0 ]; then
+            echo "::error::the platform suite reported 0 tests — refusing a vacuous pass"
+            exit 1
+          fi

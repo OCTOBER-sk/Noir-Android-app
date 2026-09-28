@@ -552,3 +552,29 @@ integrated nothing and started nothing.
 
 Unchanged and still not closable from this host: no device or emulator run, so
 no on-hardware accessibility behaviour is confirmed by the repository or by CI.
+
+## Heartbeat 2026-09-28 (CI for 4f81007, current main)
+
+`main` advanced to `4f81007` (docs-only self-review commit recording the
+`cafb887` gate). Its CI run was read from the workflow log, not assumed:
+
+- **CI run 36416614799** on `4f81007` — `success`, `Noir CI`.
+- `flutter analyze` — `No issues found!` (9.0s).
+- `flutter test` — `🎉 957 tests passed.`
+- Android platform assertion — `Suites: 5`; the vacuous-pass guard did not
+  trip, so the Kotlin suite executed rather than being skipped.
+
+**Integration state re-measured.** `git branch --no-merged main` still lists
+only `feature/night-automations`; `git cherry main feature/night-automations`
+prints `- 3526863`, a leading `-`, i.e. that branch's work is already
+represented in `main`. Nothing to merge. `main` is clean and level with
+`origin/main` (0/0 after fetch).
+
+**No workers in flight.** `git worktree list` shows only the main checkout.
+`/tmp/noir-wt-*` matches are stale `.log` files from earlier runs, not
+worktree directories, so the six named branches have no live checkouts. No
+`opencode`, `flutter`, `dart` or `gradle` process is running.
+
+This heartbeat integrated nothing and started nothing. Unchanged and still not
+closable from this host: no device or emulator run, so no on-hardware
+accessibility behaviour is confirmed by the repository or by CI.

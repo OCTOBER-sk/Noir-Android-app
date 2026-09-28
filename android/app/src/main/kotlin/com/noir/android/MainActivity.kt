@@ -474,48 +474,16 @@ class MainActivity : FlutterActivity() {
 
   private fun intOf(raw: Any?): Int? = (raw as? Number)?.toInt()
 
-  /**
-   * Structural decoding of the Dart GateVerdict.
-   *
-   * This class intentionally contains NO policy rules. Its only steering field
-   * is `allowed`, and that boolean is produced by PolicyEngine in
-   * lib/safety/policy_engine.dart. Every other field is decoded defensively so
-   * that a partial or wrong-typed reply yields null, which fails closed.
-   */
-  private data class GateVerdict(
-    val allowed: Boolean,
-    val message: String,
-    val needsBiometric: Boolean,
-    val riskLevel: Int
-  ) {
-    fun toMap(): Map<String, Any?> = mapOf(
-      "allowed" to allowed,
-      "message" to message,
-      "needsBiometric" to needsBiometric,
-      "riskLevel" to riskLevel,
-      "source" to GATE_SOURCE
-    )
-
-    companion object {
-      fun decode(raw: Any?): GateVerdict? {
-        val map = raw as? Map<*, *> ?: return null
-        val allowed = map["allowed"] as? Boolean ?: return null
-        val message = (map["message"] as? String)?.takeIf { it.isNotBlank() } ?: return null
-        val needsBiometric = map["needsBiometric"] as? Boolean ?: return null
-        val riskLevel = (map["riskLevel"] as? Number)?.toInt() ?: return null
-        return GateVerdict(allowed, message, needsBiometric, riskLevel)
-      }
-    }
-  }
-
   companion object {
     private const val TAG = "MainActivity"
 
     const val CHANNEL = "com.noir.android/channel"
 
     /** Provenance stamped on every verdict so a log line can never be mistaken
-     *  for a locally invented decision. */
-    const val GATE_SOURCE = "dart:lib/safety/policy_engine.dart"
+     *  for a locally invented decision. Aliased to the decoder's own constant
+     *  so there is exactly one string, and that one is in the android-free
+     *  GateVerdict.kt where the unit tests can reach it. */
+    const val GATE_SOURCE = GateVerdict.GATE_SOURCE
 
     // Methods served to Dart. The first three are the historical contract
     // read by lib/platform/native_bridge.dart; the last two are additive.

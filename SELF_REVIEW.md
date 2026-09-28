@@ -638,3 +638,39 @@ checkouts.
 This heartbeat integrated nothing and started nothing. Unchanged and still not
 closable from this host: no device or emulator run, so no on-hardware
 accessibility behaviour is confirmed by the repository or by CI.
+
+## Heartbeat 2026-09-28 12:13Z (CI for 577c505, current main) — and a loop to break
+
+`main` is `577c505`, level with `origin/main` (0/0 after fetch), working tree
+clean, one worktree (the main checkout).
+
+- **CI run 36419786560** on `577c505` — `success`, `Noir CI` (2m57s).
+- `flutter analyze` — `No issues found!` (9.0s).
+- `flutter test` — `🎉 957 tests passed.`
+- Android platform step — `BUILD SUCCESSFUL in 18s`, vacuous-pass guard printed
+  `Suites: 5`, so the Kotlin suite ran rather than being skipped.
+
+**Integration state re-measured.** `git branch --no-merged main` lists only
+`feature/night-automations`, and `git cherry main feature/night-automations`
+prints `- 3526863` — a leading `-`, so that branch's single unique commit is
+already represented in `main`. Nothing to merge.
+
+**No workers in flight.** No `opencode`, `flutter`, `dart` or `gradle` process
+is running. The `/tmp/noir-wt-*` entries are stale `.log` files dated
+2026-09-26, not worktree directories, so the six named branches have no live
+checkouts.
+
+**The loop, stated plainly.** The last seven commits (`291fbb3`..`577c505`) all
+touch `SELF_REVIEW.md` and nothing else — `git diff --name-only 5844755..main`
+returns that single file. Each heartbeat appended a report, that commit
+triggered a CI run, and the next heartbeat recorded the CI run, which
+triggered another. Four CI runs in the last hour (11:08, 11:36, 11:51, 11:58,
+12:07) verified the same unchanged tree. This is measurement churn, not
+progress, and it should stop.
+
+**Recommendation:** suspend the doc-append-per-heartbeat habit. A heartbeat
+should either integrate verified work or report that there is none, in the
+message it delivers — not by writing a new commit that costs a CI run. Real
+remaining work is not documentation: it is a device or emulator run, which this
+host cannot provide, so on-hardware accessibility behaviour stays unconfirmed
+by both the repository and CI. No further claim about that is made here.

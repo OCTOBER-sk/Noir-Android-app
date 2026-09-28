@@ -3,6 +3,11 @@ name: Noir CI
 on:
   push:
     branches: [main]
+    # Docs-only pushes cannot change the analyze/test/APK result, so they do
+    # not earn a 3-minute run. A commit that touches any non-`.md` path still
+    # runs, because paths-ignore only skips when *every* changed path matches.
+    paths-ignore:
+      - '**/*.md'
   pull_request:
     branches: [main]
 

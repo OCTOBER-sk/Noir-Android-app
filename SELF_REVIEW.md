@@ -470,3 +470,37 @@ Two limitations recorded rather than hidden, both a consequence of
   and a released request renders disabled everywhere, but it is a visual
   duplication. Closing it properly needs per-event correlation the event type
   does not carry, and inventing that correlation was the larger risk.
+
+## Heartbeat 2026-09-28 (CI confirmation for 291fbb3)
+
+The previous heartbeat integrated and documented the Command Centre consent
+card but recorded no CI run for it. Read from the workflow, not assumed:
+
+- **CI run 36410433712** on `291fbb3` — `success`, `Noir CI`.
+- `flutter analyze` — `No issues found!` (9.0s).
+- `flutter test` — **957 tests passed**, matching the count the previous
+  heartbeat measured locally, so the documented claim and the gate agree.
+- Android platform gate — **Suites: 5, 98 run, 0 failures, 0 errors**. The
+  workflow still runs its own "refusing a vacuous pass" assertion, and it did
+  not trip, so the Kotlin suite is executing rather than being skipped.
+
+**Integration state re-checked, not inherited.** `git branch --no-merged main`
+still lists only `feature/night-automations` at `3526863`, and the prior
+heartbeat's patch-id claim is reproducible here: `git cherry main
+feature/night-automations` prints `3526863` with a leading `-`. The diff
+against `lib/automations` and `test/automations` is 814 deletions and 1
+insertion in `main`'s favour — the scheduler, its tests, two `AutomationError`
+codes and the export. There is nothing on the branch that `main` lacks, so
+merging it would be a no-op at best.
+
+`git worktree list` shows only the main checkout, `/tmp/noir-hb-check.sh` finds
+no worktree directories under `/tmp/noir-*`, and no `opencode`, `flutter`, or
+`gradle` process is running. `main` is level with `origin/main` at `291fbb3` and
+the tree is clean. No delegated work is in flight, so this heartbeat integrated
+nothing and the previous one should not have been assumed to.
+
+Still unverified and not closable from this host: no device or emulator run, so
+no on-hardware accessibility behaviour is confirmed by anything in the
+repository. The confirmation card's hit target, contrast and screen-reader
+announcement are asserted in a widget test and reasoned from source, not
+observed.

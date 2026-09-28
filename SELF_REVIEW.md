@@ -524,3 +524,31 @@ observed.
 Unchanged and still not closable from this host: no device or emulator run, so
 no on-hardware accessibility behaviour is confirmed by anything in the
 repository or by CI.
+
+## Heartbeat 2026-09-28 (CI for cafb887, the first gate on this SHA)
+
+The last heartbeat recorded CI for `5251061`. `main` has since advanced to
+`cafb887`, and the gate for that SHA was read from the workflow, not assumed:
+
+- **CI run 36413852711** on `cafb887` — `success`, `Noir CI`.
+- `flutter analyze` — `No issues found!` (7.5s).
+- `flutter test` — exit 0; the run's own expanded log shows only passing cases
+  and the workflow's Android step reports **Suites: 5, 98 run, 0 failures,
+  0 errors**. The workflow's "refusing a vacuous pass" assertion ran and did
+  not trip, so the Kotlin suite executed rather than being skipped.
+
+**Integration state re-measured.** `git branch --no-merged main` still lists
+only `feature/night-automations`; `git cherry main feature/night-automations`
+prints `- 3526863`, and the diff over `lib/automations` and `test/automations`
+is 814 deletions / 1 insertion in `main`'s favour. `gateverdict-tests` and
+`feature/streaming-ui` are both 0 ahead of `main`, so they are integrated, not
+pending. There is nothing to merge.
+
+**No workers in flight.** `git worktree list` shows only the main checkout at
+`cafb887`; the `/tmp/noir-wt-*` matches are stale log files from earlier runs,
+not worktree directories; no `opencode`, `flutter`, `dart` or `gradle` process
+is running. `main` is clean and level with `origin/main`. This heartbeat
+integrated nothing and started nothing.
+
+Unchanged and still not closable from this host: no device or emulator run, so
+no on-hardware accessibility behaviour is confirmed by the repository or by CI.

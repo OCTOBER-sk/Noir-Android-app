@@ -504,3 +504,23 @@ no on-hardware accessibility behaviour is confirmed by anything in the
 repository. The confirmation card's hit target, contrast and screen-reader
 announcement are asserted in a widget test and reasoned from source, not
 observed.
+
+## Heartbeat 2026-09-28 (re-verification of 5251061)
+
+- **CI run 36413034501** on `5251061` — `success`, `Noir CI` (3m27s).
+- `flutter analyze` — `No issues found!` (1.2s).
+- `flutter test` — **957 tests passed** locally, matching the count the previous
+  heartbeat recorded for `291fbb3`; the two new commits since are documentation
+  only, so the flat count is the expected result rather than a coincidence.
+- `git cherry main feature/night-automations` again prints `3526863` with a
+  leading `-`, and `git diff main feature/night-automations` over
+  `lib/automations` and `test/automations` is 814 deletions / 1 insertion in
+  `main`'s favour. `git branch --no-merged main` still lists only that branch,
+  so there is again nothing to integrate.
+- `git worktree list` shows only the main checkout; no `/tmp/noir-wt-*`
+  directories exist; no `opencode`, `flutter`, or `gradle` process was running
+  during this check. `main` is clean and level with `origin/main` at `5251061`.
+
+Unchanged and still not closable from this host: no device or emulator run, so
+no on-hardware accessibility behaviour is confirmed by anything in the
+repository or by CI.

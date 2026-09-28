@@ -576,6 +576,66 @@ void main() {
         isNull,
       );
     });
+
+    // These pin the agreement with `GateVerdict.decode` in GateVerdict.kt. The
+    // two decoders claim the same wire format, so a value one accepts and the
+    // other refuses is a silent divergence. Dart now widens the same way Kotlin
+    // does, while still refusing anything that is not an exact integer.
+    test('accepts an integral Double riskLevel, as the platform decoder does', () {
+      final decoded = NativeGateVerdict.fromChannelMap(<Object?, Object?>{
+        'allowed': true,
+        'message': 'ok',
+        'needsBiometric': false,
+        'riskLevel': 2.0,
+      });
+
+      expect(decoded, isNotNull);
+      expect(decoded!.riskLevel, 2);
+      expect(decoded.riskLevel, isA<int>());
+    });
+
+    test('accepts a negative integral Double, matching the platform decoder', () {
+      final decoded = NativeGateVerdict.fromChannelMap(<Object?, Object?>{
+        'allowed': false,
+        'message': 'denied',
+        'needsBiometric': false,
+        'riskLevel': -1.0,
+      });
+
+      expect(decoded, isNotNull);
+      expect(decoded!.riskLevel, -1);
+    });
+
+    test('still refuses a fractional, non-numeric or non-finite riskLevel', () {
+      NativeGateVerdict? refused(Object? riskLevel) =>
+          NativeGateVerdict.fromChannelMap(<Object?, Object?>{
+            'allowed': true,
+            'message': 'ok',
+            'needsBiometric': false,
+            'riskLevel': riskLevel,
+          });
+
+      expect(refused(2.5), isNull);
+      expect(refused('2'), isNull);
+      expect(refused(null), isNull);
+      expect(refused(double.nan), isNull);
+      expect(refused(double.infinity), isNull);
+      expect(refused(double.negativeInfinity), isNull);
+    });
+
+    test('the steering field stays strict even when riskLevel widens', () {
+      // Widening `riskLevel` must not have relaxed anything else: `allowed` is
+      // the field a gesture actually depends on, and both decoders still
+      // require a strict Boolean for it.
+      final decoded = NativeGateVerdict.fromChannelMap(<Object?, Object?>{
+        'allowed': 1,
+        'message': 'ok',
+        'needsBiometric': false,
+        'riskLevel': 2.0,
+      });
+
+      expect(decoded, isNull);
+    });
   });
 
   group('GestureBounds', () {

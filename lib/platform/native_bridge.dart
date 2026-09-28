@@ -148,12 +148,22 @@ class NativeGateVerdict {
       return null;
     }
     if (message.trim().isEmpty) return null;
-    if (riskLevel is! int) return null;
+    // The standard MethodChannel codec hands back Int/Long/Double
+    // interchangeably, so an integral `riskLevel` is accepted at whatever width
+    // it arrives in — this mirrors `GateVerdict.decode` in GateVerdict.kt, and
+    // the two decoders claiming the same wire format must agree. A Double that
+    // is not integral is still rejected, so this widens the accepted numeric
+    // width without ever accepting a fractional or non-numeric risk level.
+    if (riskLevel is! num) return null;
+    if (riskLevel is double && riskLevel != riskLevel.roundToDouble()) {
+      return null;
+    }
+    if (riskLevel.isNaN || riskLevel.isInfinite) return null;
     return NativeGateVerdict(
       allowed: allowed,
       message: message,
       needsBiometric: needsBiometric,
-      riskLevel: riskLevel,
+      riskLevel: riskLevel.toInt(),
     );
   }
 }

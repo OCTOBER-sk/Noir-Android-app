@@ -578,3 +578,30 @@ worktree directories, so the six named branches have no live checkouts. No
 This heartbeat integrated nothing and started nothing. Unchanged and still not
 closable from this host: no device or emulator run, so no on-hardware
 accessibility behaviour is confirmed by the repository or by CI.
+
+## Heartbeat 2026-09-28 (CI for 12dbf6d, current main)
+
+`main` is `12dbf6d`, level with `origin/main` (0/0), working tree clean, one
+worktree (the main checkout). Its CI run was read from the workflow log:
+
+- **CI run 36418141104** on `12dbf6d` — `success`, `Noir CI`.
+- `flutter analyze` — `No issues found!` (9.1s).
+- `flutter test` — `🎉 957 tests passed.`
+- Android platform step — `(cd android && ./gradlew testDebugUnitTest
+  --no-build-cache)` → `BUILD SUCCESSFUL in 21s`, after the wrapper-executable
+  and wrapper-jar presence assertions passed.
+
+**Integration state re-measured.** `git rev-list --left-right --count
+main...<branch>` reports every one of the 23 local branches at `0` ahead of
+`main` except `feature/night-automations`, which is `1` ahead — and that single
+commit is one `main` already represents (`git cherry` shows it as `-`), i.e. it
+is a duplicate history, not new work. Nothing to merge.
+
+**No workers in flight.** No `opencode`, `flutter`, `dart` or `gradle` process
+is running. The `/tmp/noir-wt-*` entries are stale `.log` files from earlier
+runs, not worktree directories, so the six named branches have no live
+checkouts.
+
+This heartbeat integrated nothing and started nothing. Unchanged and still not
+closable from this host: no device or emulator run, so no on-hardware
+accessibility behaviour is confirmed by the repository or by CI.

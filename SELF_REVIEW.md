@@ -230,3 +230,71 @@ The previous heartbeat wrote its section but recorded the pre-change state, so t
 - `git branch --no-merged main` still lists only `feature/night-automations` at `3526863`. Re-checked rather than assumed: `git diff 3526863 main -- lib/automations test/automations` shows only `main` being *ahead* (the `automation_scheduler.dart` export, `invalidAction`, `invalidRunCount`, plus the 436-line scheduler and its tests). Nothing on the branch is missing from `main`, so there is still nothing to integrate.
 
 One thing this heartbeat did not do: it did not verify the *emission sites* by hand. The new test is a source-reading gate, so "938 pass" confirms the contract test still catches a removed emission — it does not independently confirm that `ToolCallStarted` fires at a moment when the Command Centre's rows will actually render. That remains a read-the-code judgement, and it is recorded as one.
+
+---
+
+## Heartbeat 2026-09-28 (skeleton loader never cleared after a tool call)
+
+The previous heartbeat left one item open: it had wired `ToolCallStarted` /
+`ToolCallCompleted` but had *not* verified "that `ToolCallStarted` fires at a
+moment when the Command Centre's rows will actually render", recording that as a
+read-the-code judgement. This heartbeat resolved it by reading the code, and the
+read turned up a real defect.
+
+`pushRealEvent` (`lib/ui/command_centre_screen.dart:301`) set `_showSkeleton =
+true` on `ToolCallStarted` and cleared it **only** on
+`ActionCompletedWithUndoWindow`. Those two events do not bracket a tool call.
+`AgentRuntimePipeline` awaits `undoWindow.open(5, ...)` *before*
+`execute.run(plan)` (`lib/agent/agent_runtime.dart:75-76`), so on a real run the
+order is:
+
+```
+ActionCompletedWithUndoWindow  -> _showSkeleton = false
+ToolCallStarted                -> _showSkeleton = true
+ToolCallCompleted              -> nothing at all
+```
+
+Nothing after the tool starts ever clears the flag, so the loader animates for
+the rest of the session. This is the direct cost of the previous heartbeat's own
+work: it made `ToolCallStarted` reachable for the first time, which is what
+exposed the state it was setting to a state nothing could turn off. Before that,
+`_showSkeleton` was permanently false and the bug was invisible.
+
+Fixed by clearing on `ToolCallCompleted` too. The undo-window clear is kept,
+because that is still the only completion signal on paths that never reach a
+tool.
+
+`test/ui/command_centre_skeleton_lifecycle_test.dart` pushes events through the
+screen's injected `events` stream — the same wire `main.dart:219` connects to
+`composition.taskRun.events` — rather than calling the state directly, so it
+exercises the production delivery path. It asserts the real production ordering.
+
+**The RED run, because a gate that cannot fail is not a gate:** before the fix,
+"a tool call that finishes stops the loader" and "a failed tool call also stops
+the loader" both failed, while the two control tests ("the loader is shown while
+a tool call is in flight", "the tool micro-copy still renders from the same run")
+passed. So the new tests detect this specific bug and are not failing for some
+incidental reason. The controls also stop a future "fix" that deletes the loader
+outright, and confirm the fix does not cost the micro-copy rows the earlier
+heartbeat wired.
+
+`flutter analyze` — `No issues found!`. `flutter test` — **942 tests, all
+passed** (938 → 942, exactly the four new ones).
+
+**Verified state of `main` at `0d4fb30`**: clean and level with `origin/main`
+(`git rev-list --count origin/main..main` = 0); local `HEAD` and `origin/main`
+both `0d4fb3057a7d33c402ca3bdc19c33d6a5266e993`. CI run **36401778033** was
+still `in_progress` at the time this section was written; its result is not
+claimed here and must be read from the run itself.
+
+No worker processes, no `/tmp/noir-wt-*` worktrees (`git worktree list` shows
+only the main checkout; the three `/tmp/noir-wt-*.log` paths are stale
+`flutter analyze` logs dated 2026-09-26). `feature/night-automations` remains the
+only unmerged branch and remains patch-id-equivalent to `main`: the diff against
+`lib/automations` and `test/automations` shows only `main` being ahead (the
+`automation_scheduler.dart` export, `invalidAction`, `invalidRunCount`, the
+436-line scheduler and its tests). Nothing to integrate.
+
+Still unverified and not closable here: there is no device or emulator run, so
+nothing in this repository confirms on-hardware behaviour. This fix is asserted
+by a widget test over the real event wire, not by an observed frame on a device.

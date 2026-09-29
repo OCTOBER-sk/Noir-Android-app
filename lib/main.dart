@@ -211,10 +211,7 @@ class _SplashScreenState extends State<SplashScreen> {
     // they must reach `PendingConfirmation.answer` through one implementation —
     // two copies of this lambda would eventually disagree about what consenting
     // means, and one of them would be the copy nobody re-reads.
-    void answerConfirmation(
-      PendingConfirmation confirmation,
-      bool approved,
-    ) {
+    void answerConfirmation(PendingConfirmation confirmation, bool approved) {
       // The gate holds the pending request; answering it here is the whole
       // consent path, and the only call that can approve a gated action.
       confirmation.answer(approved);

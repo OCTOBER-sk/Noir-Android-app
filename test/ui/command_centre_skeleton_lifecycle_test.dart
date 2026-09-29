@@ -48,7 +48,10 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: CommandCentreScreen(controller: controller, events: events.stream),
+        home: CommandCentreScreen(
+          controller: controller,
+          events: events.stream,
+        ),
       ),
     );
     return events;

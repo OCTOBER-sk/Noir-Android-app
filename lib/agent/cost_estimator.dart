@@ -61,7 +61,10 @@ class CostEstimator {
   /// This is index selection only. The caller owns the actual provider call and
   /// the decision to advance [attempt] on a 429 or a rotation; this function
   /// performs no request and never swallows a failure.
-  static String resolveWithFallback(List<String> fallbackIds, {int attempt = 0}) {
+  static String resolveWithFallback(
+    List<String> fallbackIds, {
+    int attempt = 0,
+  }) {
     if (attempt < 0 || attempt >= fallbackIds.length) {
       throw Exception(
         'Fallback chain exhausted after ${fallbackIds.length} attempt(s); '

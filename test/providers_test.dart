@@ -38,22 +38,25 @@ void main() {
       expect(funded.dailyUsed, equals(10));
     });
 
-    test('CostEstimator carries the caller chain verbatim, inventing nothing', () {
-      const List<String> live = <String>['vendor/alpha:free', 'vendor/beta'];
-      final estimate = CostEstimator.estimate(
-        funded: false,
-        usedToday: 0,
-        availableFallbackIds: live,
-      );
+    test(
+      'CostEstimator carries the caller chain verbatim, inventing nothing',
+      () {
+        const List<String> live = <String>['vendor/alpha:free', 'vendor/beta'];
+        final estimate = CostEstimator.estimate(
+          funded: false,
+          usedToday: 0,
+          availableFallbackIds: live,
+        );
 
-      expect(estimate.fallbackIds, equals(live));
-      // The chain must never gain an id the catalog did not serve.
-      expect(estimate.fallbackIds, isNot(contains('free-model-a')));
-      expect(
-        estimate.fallbackIds.every((String id) => id.startsWith('vendor/')),
-        isTrue,
-      );
-    });
+        expect(estimate.fallbackIds, equals(live));
+        // The chain must never gain an id the catalog did not serve.
+        expect(estimate.fallbackIds, isNot(contains('free-model-a')));
+        expect(
+          estimate.fallbackIds.every((String id) => id.startsWith('vendor/')),
+          isTrue,
+        );
+      },
+    );
 
     test('an empty live catalog yields an empty chain, not a padded one', () {
       final estimate = CostEstimator.estimate(
@@ -65,41 +68,41 @@ void main() {
       expect(estimate.fallbackIds, isEmpty);
     });
 
-    test('the chain is unmodifiable so no caller can mutate a shared estimate', () {
-      final estimate = CostEstimator.estimate(
-        funded: false,
-        usedToday: 0,
-        availableFallbackIds: const <String>['vendor/alpha:free'],
-      );
-
-      expect(
-        () => estimate.fallbackIds.add('vendor/injected'),
-        throwsUnsupportedError,
-      );
-    });
-
     test(
-      'resolveWithFallback walks the chain in order, then fails loudly',
+      'the chain is unmodifiable so no caller can mutate a shared estimate',
       () {
-        const List<String> ids = <String>['vendor/a:free', 'vendor/b:free'];
-
-        for (var attempt = 0; attempt < ids.length; attempt++) {
-          expect(
-            CostEstimator.resolveWithFallback(ids, attempt: attempt),
-            equals(ids[attempt]),
-          );
-        }
-
-        expect(
-          () => CostEstimator.resolveWithFallback(ids, attempt: ids.length),
-          throwsA(isA<Exception>()),
+        final estimate = CostEstimator.estimate(
+          funded: false,
+          usedToday: 0,
+          availableFallbackIds: const <String>['vendor/alpha:free'],
         );
-        // A negative attempt is a caller bug, not a wrap-around to the last id.
+
         expect(
-          () => CostEstimator.resolveWithFallback(ids, attempt: -1),
-          throwsA(isA<Exception>()),
+          () => estimate.fallbackIds.add('vendor/injected'),
+          throwsUnsupportedError,
         );
       },
     );
+
+    test('resolveWithFallback walks the chain in order, then fails loudly', () {
+      const List<String> ids = <String>['vendor/a:free', 'vendor/b:free'];
+
+      for (var attempt = 0; attempt < ids.length; attempt++) {
+        expect(
+          CostEstimator.resolveWithFallback(ids, attempt: attempt),
+          equals(ids[attempt]),
+        );
+      }
+
+      expect(
+        () => CostEstimator.resolveWithFallback(ids, attempt: ids.length),
+        throwsA(isA<Exception>()),
+      );
+      // A negative attempt is a caller bug, not a wrap-around to the last id.
+      expect(
+        () => CostEstimator.resolveWithFallback(ids, attempt: -1),
+        throwsA(isA<Exception>()),
+      );
+    });
   });
 }

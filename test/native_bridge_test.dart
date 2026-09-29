@@ -581,30 +581,36 @@ void main() {
     // two decoders claim the same wire format, so a value one accepts and the
     // other refuses is a silent divergence. Dart now widens the same way Kotlin
     // does, while still refusing anything that is not an exact integer.
-    test('accepts an integral Double riskLevel, as the platform decoder does', () {
-      final decoded = NativeGateVerdict.fromChannelMap(<Object?, Object?>{
-        'allowed': true,
-        'message': 'ok',
-        'needsBiometric': false,
-        'riskLevel': 2.0,
-      });
+    test(
+      'accepts an integral Double riskLevel, as the platform decoder does',
+      () {
+        final decoded = NativeGateVerdict.fromChannelMap(<Object?, Object?>{
+          'allowed': true,
+          'message': 'ok',
+          'needsBiometric': false,
+          'riskLevel': 2.0,
+        });
 
-      expect(decoded, isNotNull);
-      expect(decoded!.riskLevel, 2);
-      expect(decoded.riskLevel, isA<int>());
-    });
+        expect(decoded, isNotNull);
+        expect(decoded!.riskLevel, 2);
+        expect(decoded.riskLevel, isA<int>());
+      },
+    );
 
-    test('accepts a negative integral Double, matching the platform decoder', () {
-      final decoded = NativeGateVerdict.fromChannelMap(<Object?, Object?>{
-        'allowed': false,
-        'message': 'denied',
-        'needsBiometric': false,
-        'riskLevel': -1.0,
-      });
+    test(
+      'accepts a negative integral Double, matching the platform decoder',
+      () {
+        final decoded = NativeGateVerdict.fromChannelMap(<Object?, Object?>{
+          'allowed': false,
+          'message': 'denied',
+          'needsBiometric': false,
+          'riskLevel': -1.0,
+        });
 
-      expect(decoded, isNotNull);
-      expect(decoded!.riskLevel, -1);
-    });
+        expect(decoded, isNotNull);
+        expect(decoded!.riskLevel, -1);
+      },
+    );
 
     test('still refuses a fractional, non-numeric or non-finite riskLevel', () {
       NativeGateVerdict? refused(Object? riskLevel) =>

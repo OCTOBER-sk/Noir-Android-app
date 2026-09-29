@@ -48,8 +48,9 @@ const Map<String, String> kReservedEvents = <String, String>{
 
 String _libSource({required bool excludeContract}) {
   final StringBuffer buffer = StringBuffer();
-  for (final File file
-      in Directory('lib').listSync(recursive: true).whereType<File>()) {
+  for (final File file in Directory(
+    'lib',
+  ).listSync(recursive: true).whereType<File>()) {
     if (!file.path.endsWith('.dart')) continue;
     if (excludeContract && file.path.endsWith('ui_state_contract.dart')) {
       continue;
@@ -84,11 +85,12 @@ void main() {
     // Guards the constant above against silently drifting from the source of
     // truth: a new subtype added to ui_state_contract.dart without being listed
     // here would escape both assertions below.
-    final String contract = File('lib/core/ui_state_contract.dart').readAsStringSync();
-    final Set<String> declared = RegExp(r'class (\w+) extends NoirUiEvent')
-        .allMatches(contract)
-        .map((Match m) => m.group(1)!)
-        .toSet();
+    final String contract = File(
+      'lib/core/ui_state_contract.dart',
+    ).readAsStringSync();
+    final Set<String> declared = RegExp(
+      r'class (\w+) extends NoirUiEvent',
+    ).allMatches(contract).map((Match m) => m.group(1)!).toSet();
     expect(
       declared,
       kContractEvents.map((Type t) => t.toString()).toSet(),
@@ -131,15 +133,17 @@ void main() {
     });
   });
 
-  test('a reserved subtype is genuinely absent from lib/, not just unlisted', () {
-    // Otherwise "reserved" would become a place to hide a regression.
-    final String contract =
-        File('lib/core/ui_state_contract.dart').readAsStringSync();
-    for (final String name in kReservedEvents.keys) {
-      final int uses = RegExp('\\b$name\\b')
-          .allMatches(contract)
-          .length;
-      expect(uses, greaterThan(0), reason: '$name should still be declared');
-    }
-  });
+  test(
+    'a reserved subtype is genuinely absent from lib/, not just unlisted',
+    () {
+      // Otherwise "reserved" would become a place to hide a regression.
+      final String contract = File(
+        'lib/core/ui_state_contract.dart',
+      ).readAsStringSync();
+      for (final String name in kReservedEvents.keys) {
+        final int uses = RegExp('\\b$name\\b').allMatches(contract).length;
+        expect(uses, greaterThan(0), reason: '$name should still be declared');
+      }
+    },
+  );
 }

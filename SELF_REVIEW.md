@@ -674,3 +674,43 @@ message it delivers — not by writing a new commit that costs a CI run. Real
 remaining work is not documentation: it is a device or emulator run, which this
 host cannot provide, so on-hardware accessibility behaviour stays unconfirmed
 by both the repository and CI. No further claim about that is made here.
+
+---
+
+## Heartbeat 2026-09-29 00:xx UTC (docs-only CI skip, verified by pushing this file)
+
+**This commit is the experiment.** `de8838f` added
+`paths-ignore: ['**/*.md']` to the Noir CI `push` trigger on `main` to stop
+the self-review commit → CI run → self-review commit loop. That claim had never
+been executed: every run since `de8838f` came from a commit that also touched a
+non-Markdown path. A Markdown-only push is exactly the case the filter claims
+to skip, so pushing this section is the cheapest possible test — one file
+changed, nothing else. If the filter is correct, **no CI run appears for this
+commit**. If one does, the filter is wrong and the loop is still live.
+
+State of `main` at `de8838f`, measured rather than inherited:
+
+- `git status --short --branch` — clean, level with `origin/main`;
+  `git rev-list --count origin/main..main` = 0.
+- `flutter analyze` — `No issues found!` (0.7s, local).
+- `flutter test` — **957 tests, all passed** (local). Matches CI exactly, not
+  approximately: CI run 36462073637 logged `🎉 957 tests passed.`
+- CI run **36462073637** on `de8838f` — `success`, 3m12s; platform guard
+  printed `Suites: 5`, so the Kotlin gate ran rather than passing vacuously.
+- `git cherry main feature/night-automations` → `- 3526863`. The leading `-` is
+  Git's patch-id verdict: that branch's only unique commit is already
+  represented in `main`. `git diff --stat 3526863 main -- lib/automations
+  test/automations` shows 814 insertions, all of them on the `main` side (the
+  365-line `automation_scheduler.dart` and its 436-line test). The branch is a
+  snapshot `main` has passed. Nothing to integrate, and cherry-picking it would
+  revert the newer error codes.
+- No `opencode`/`flutter`/`dart`/`gradle` process running.
+  `git worktree list` shows only the main checkout. The six `/tmp/noir-wt-*`
+  paths in the heartbeat script's output are stale `.log` files, not worktree
+  directories — the script's "worktree missing" line is correct about the
+  worktrees and misleading about why.
+
+**Standing gap, unchanged and not closable on this host:** no device or
+emulator run. The accessibility bridge is verified by tests against a mocked
+channel plus CI, never by an observed gesture on hardware. No claim is made here
+that one exists.

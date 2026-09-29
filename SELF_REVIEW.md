@@ -764,3 +764,43 @@ decision, not a heartbeat.
 emulator run. The accessibility bridge is verified by tests against a mocked
 channel plus CI, never by an observed gesture on hardware. No claim is made here
 that one exists. This is the one thing a green CI badge does not cover.
+
+---
+
+## Heartbeat 2026-09-29 ~02:35 UTC — idle; last unmerged branch now reconciled
+
+Measured this run, nothing inherited:
+
+- `git status --porcelain` — 0 lines. `main` = `origin/main` = `67a1983`
+  ("docs(self-review): confirm the docs-only CI skip and close the doc loop",
+  2026-09-29 02:06 UTC).
+- `git worktree list` — 1 entry, the main checkout. No `/tmp/noir-wt-*`
+  worktree exists; the heartbeat script's six "worktree missing" lines refer
+  to those paths and are correct about the worktrees, misleading only about
+  the reason.
+- `pgrep -af "opencode|flutter|dart|gradle"` — 0 worker matches (the single hit
+  is this heartbeat's own shell). No worker running, none dispatched here.
+- `gh run list --commit HEAD` — 0 runs. The docs-only `paths-ignore` skip added
+  in `de8838f` still holds for a second Markdown-only commit; the newest run in
+  the workflow remains **36462073637** on `de8838f`.
+- `git branch -r` — `origin/main` only. Every feature/integration branch is
+  local residue.
+
+**One state change since the previous heartbeat, and it is a real one:**
+`git branch --no-merged main` is now **empty**. The stale
+`feature/night-automations` snapshot flagged at ~02:20 reconciles as merged —
+`git cherry main feature/night-automations` returns 0 lines, no unique patch
+left to absorb. No cherry-pick, no revert risk. Every remaining branch
+(`integration/full-runtime`, `integration/night`, `integration/ui-verify`,
+`integration/ui-wiring`, `feature/agent-runtime-truth`,
+`feature/automation-scheduler`, `feature/data-persistence`, `feature/mcp-wiring`,
+`feature/provider-runtime`) is 47–77 commits *behind* `main` and 0 ahead.
+
+**Nothing was dispatched.** With no branch carrying unique work, no unmerged
+commit, no dirty tree and no failing gate, manufacturing a worker here would be
+activity without evidence. `main` carries 80 `lib/` Dart files and 51 tests.
+
+**Standing gap, unchanged and not closable on this host:** no device or
+emulator run. The accessibility bridge is verified by tests against a mocked
+channel plus CI, never by an observed gesture on hardware. No claim is made here
+that one exists. This is the one thing a green CI badge does not cover.

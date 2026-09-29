@@ -875,3 +875,38 @@ routine heartbeat rather than a deliberate proof.
 emulator run. The accessibility bridge is verified by tests against a mocked
 channel plus CI, never by an observed gesture on hardware. No claim is made here
 that one exists. This is the one thing a green CI badge does not cover.
+
+---
+
+## Heartbeat 2026-09-29 ~15:xx UTC — idle; fifth consecutive no-op run
+
+Measured this run, nothing inherited:
+
+- `git status --porcelain` — 0 lines. `main` = `origin/main` = `c2115c8`
+  ("docs(self-review): record the 14:40 idle heartbeat and the closed docs-only
+  CI loop", 2026-09-29). Ahead/behind vs origin: 0/0.
+- `gh run list --commit c2115c8` — 0 runs. Fifth Markdown-only commit since
+  `de8838f` to produce 0 runs; newest workflow run is still **36462073637** on
+  `de8838f` (success, 3m12s).
+- `git worktree list` — 1 entry, the main checkout. The three
+  `/tmp/noir-wt-*-analyze.log` files are still the stale 2026-09-26 08:29
+  artifacts; no `/tmp/noir-wt-*` worktree directory exists. The pre-run
+  script's six "worktree missing" lines are correct and stay unexplained by
+  work: nothing was dispatched.
+- `ps -eo cmd` grep for `opencode|claude|flutter|dart|gradle` — 0 workers.
+- `git branch --no-merged main` — empty. `git rev-list --count --branches
+  --not main` — 0. All 23 local branches are 0 ahead; nothing anywhere holds
+  unique work.
+- `main` carries 80 `lib/` Dart files, 51 `*_test.dart` files, 12 Kotlin files.
+
+**Nothing was dispatched.** No unmerged commit, no dirty tree, no worker, no
+failing gate. A worker here would be activity without evidence.
+
+**Standing gap, unchanged and not closable on this host:** no device or
+emulator run. The accessibility bridge is verified by tests against a mocked
+channel plus CI, never by an observed gesture on hardware.
+
+**Meta-note worth flagging:** the last four `main` commits are heartbeats
+about there being nothing to do. This entry is the fifth. Recording idle runs
+is no longer producing new information; the next useful run should either
+dispatch real work or report only on a state change.

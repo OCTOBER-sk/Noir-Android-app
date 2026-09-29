@@ -714,3 +714,53 @@ State of `main` at `de8838f`, measured rather than inherited:
 emulator run. The accessibility bridge is verified by tests against a mocked
 channel plus CI, never by an observed gesture on hardware. No claim is made here
 that one exists.
+
+---
+
+## Heartbeat 2026-09-29 ~02:20 UTC — docs-only CI skip CONFIRMED; loop closed
+
+**The experiment in `8a7302e` passed.** `8a7302e` touched exactly one path,
+`SELF_REVIEW.md` (+40 lines, `git show --stat` confirms: no other file).
+`gh run list --commit 8a7302ea0b85f8e343fcdd4f9b9ff5117bcff812` returns
+**zero runs** — an empty result, not a truncated one. The newest run in the
+workflow is still **36462073637** on `de8838f`, the commit *before* the
+experiment.
+
+So the `paths-ignore: ['**/*.md']` filter on the `push` trigger does what
+`de8838f` claimed. The self-review → CI → self-review loop, visible in every
+run list from 36410433712 through 36462073637, is broken. Future Markdown-only
+commits to `main` are free. Code commits are unaffected: they still match no
+ignore pattern and still run the full gate (36462073637, 3m12s, `Suites: 5`).
+
+Measured state of `main` this run, not inherited:
+
+- `git status --porcelain` — 0 lines. `git rev-list --count origin/main..main`
+  — 0. `main` = `origin/main` = `8a7302e`.
+- `git worktree list` — 1 entry, the main checkout. No `/tmp/noir-wt-*`
+  worktree exists; the heartbeat script's "worktree missing" lines refer to
+  those paths and are correct.
+- `pgrep -af "opencode|flutter|dart|gradle"` — 0 matches. No worker is
+  running and none has been started by this run.
+- Remote branches: `main` only. Every feature/integration branch is local
+  residue from previous runs; none is pushed.
+
+Unmerged-branch state re-checked, not assumed:
+
+- `git branch --no-merged main` → **`feature/night-automations`**, one branch.
+  This is the same branch flagged in the previous heartbeat and its status is
+  unchanged: its only unique commit is already represented in `main` by patch-id
+  (`git cherry main feature/night-automations` → `- 3526863`), and the
+  `lib/automations` + `test/automations` diff shows all 814 insertions on the
+  `main` side. It is a stale snapshot of work `main` has already absorbed.
+  Cherry-picking it would revert the newer error codes. **Do not integrate.**
+
+**Nothing was dispatched this heartbeat.** With no branch carrying unique work,
+no unmerged commit to review, and no failing gate, the correct supervisor action
+is to record the closed loop and stand down — not to manufacture a worker to
+look busy. The next real unit of work is a new feature, which needs a scope
+decision, not a heartbeat.
+
+**Standing gap, unchanged and not closable on this host:** no device or
+emulator run. The accessibility bridge is verified by tests against a mocked
+channel plus CI, never by an observed gesture on hardware. No claim is made here
+that one exists. This is the one thing a green CI badge does not cover.

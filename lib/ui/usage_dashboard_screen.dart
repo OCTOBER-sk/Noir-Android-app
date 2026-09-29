@@ -14,6 +14,14 @@ import 'package:flutter/material.dart';
 /// a zero would say "nothing happened", which is a different claim.
 const String kUsageUnknownFigure = '—';
 
+/// What the Current model card says once the user has turned the model name
+/// off (V2.3 §2.4, "toggle for model-name visibility").
+///
+/// This is deliberately not [kUsageUnknownFigure]. A dash means the source never
+/// named a model; reusing it here would turn a user's display choice into a
+/// claim about the data, which is the one substitution this file exists to avoid.
+const String kUsageHiddenFigure = 'Hidden';
+
 /// What a usage source actually reported.
 ///
 /// Every field is optional on purpose: a partial snapshot is normal, and the
@@ -95,6 +103,18 @@ class UsageDashboardScreen extends StatefulWidget {
 class _UsageDashboardScreenState extends State<UsageDashboardScreen> {
   StreamSubscription<UsageState>? _subscription;
   UsageState? _state;
+
+  /// Whether the Current model card may name the model (V2.3 §2.4).
+  ///
+  /// This is view state, held here for the lifetime of this screen instance for
+  /// the same reason `_state` is: it is what this screen is displaying, not what
+  /// the source reported. [UsageSnapshot] keeps whatever the source said — the
+  /// toggle never rewrites `activeModel`, so hiding the name cannot turn a
+  /// reported model into an unreported one for anything that reads the snapshot.
+  ///
+  /// Defaults to visible: the card has always shown the name, and a spec that
+  /// asks for a toggle does not ask for a changed default.
+  bool _showModelName = true;
 
   @override
   void initState() {
@@ -241,14 +261,38 @@ class _UsageDashboardScreenState extends State<UsageDashboardScreen> {
         detail: 'A snapshot arrived without a single reported figure.',
       );
     }
-    return _SnapshotBody(snapshot: snapshot);
+    return _SnapshotBody(
+      snapshot: snapshot,
+      showModelName: _showModelName,
+      onModelNameVisibilityChanged: _setModelNameVisible,
+    );
+  }
+
+  /// The toggle is the only writer of `_showModelName`, and it lives here with
+  /// `_state` so the preference cannot outlive the screen that was showing it.
+  void _setModelNameVisible(bool visible) {
+    if (!mounted || visible == _showModelName) {
+      return;
+    }
+    setState(() => _showModelName = visible);
   }
 }
 
 class _SnapshotBody extends StatelessWidget {
-  const _SnapshotBody({required this.snapshot});
+  const _SnapshotBody({
+    required this.snapshot,
+    required this.showModelName,
+    required this.onModelNameVisibilityChanged,
+  });
 
   final UsageSnapshot snapshot;
+
+  /// Whether the model identifier may be printed. See `_showModelName` on the
+  /// screen's state.
+  final bool showModelName;
+
+  /// Handed straight to the toggle; the body itself holds no preference.
+  final ValueChanged<bool> onModelNameVisibilityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -280,9 +324,23 @@ class _SnapshotBody extends StatelessWidget {
         const SizedBox(height: 10),
         _MetricCard(
           label: 'Current model',
-          value: snapshot.activeModel ?? kUsageUnknownFigure,
+          // Hidden is a state the user chose, so it is named rather than
+          // blanked, and it is muted so it cannot be mistaken for a reading.
+          value: showModelName
+              ? snapshot.activeModel ?? kUsageUnknownFigure
+              : kUsageHiddenFigure,
+          valueMuted: !showModelName,
         ),
         const SizedBox(height: 10),
+        // Only offered when there is a name to hide. A switch over a figure the
+        // source never reported would be a control that does nothing.
+        if (snapshot.activeModel != null) ...[
+          _ModelVisibilityRow(
+            visible: showModelName,
+            onChanged: onModelNameVisibilityChanged,
+          ),
+          const SizedBox(height: 10),
+        ],
         _MetricCard(label: 'RPM headroom', value: rpm),
         const SizedBox(height: 16),
         Text(
@@ -404,11 +462,81 @@ class _RetryButton extends StatelessWidget {
   }
 }
 
+/// V2.3 §2.4's "toggle for model-name visibility", drawn the way §2.5 draws the
+/// policy toggles: a Switch row in a bordered monochrome container.
+///
+/// The switch is themed entirely in V2.3 tokens rather than inheriting the
+/// framework's, because the framework default is an accent colour and this
+/// screen is "zero accent colours". Both states are greyscale, so the switch
+/// reads as on/off by position and value, not by hue.
+class _ModelVisibilityRow extends StatelessWidget {
+  const _ModelVisibilityRow({required this.visible, required this.onChanged});
+
+  final bool visible;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2A2A2A), width: 1),
+      ),
+      // The tile's own Material has to sit inside the decorated container,
+      // otherwise the framework rejects the tile as having invisible ink.
+      child: Material(
+        color: Colors.transparent,
+        child: SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text(
+            'Show model name',
+            style: TextStyle(
+              color: Color(0xFFE5E5E5),
+              fontSize: 14,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          // Says which of the two states the screen is in, so "hidden" is a
+          // choice the user can see they made rather than a card that went quiet.
+          subtitle: Text(
+            visible
+                ? 'The Current model card names the model.'
+                : 'The Current model card reads "$kUsageHiddenFigure".',
+            style: const TextStyle(
+              color: Color(0xFFB0B0B0),
+              fontSize: 11,
+              height: 1.3,
+            ),
+          ),
+          value: visible,
+          onChanged: onChanged,
+          activeThumbColor: const Color(0xFFFFFFFF),
+          activeTrackColor: const Color(0xFF2A2A2A),
+          inactiveThumbColor: const Color(0xFF2A2A2A),
+          inactiveTrackColor: const Color(0xFF1E1E1E),
+        ),
+      ),
+    );
+  }
+}
+
 class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.label, required this.value});
+  const _MetricCard({
+    required this.label,
+    required this.value,
+    this.valueMuted = false,
+  });
 
   final String label;
   final String value;
+
+  /// Draws the value in muted grey even though it is not the unknown dash —
+  /// used for the "Hidden" state, which is a deliberate state and not a
+  /// reading, and must not look like one.
+  final bool valueMuted;
 
   @override
   Widget build(BuildContext context) {
@@ -448,7 +576,7 @@ class _MetricCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
               style: TextStyle(
-                color: value == kUsageUnknownFigure
+                color: value == kUsageUnknownFigure || valueMuted
                     ? const Color(0xFF5A5A5A)
                     : const Color(0xFFFFFFFF),
                 fontSize: 15,

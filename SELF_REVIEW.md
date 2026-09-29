@@ -835,3 +835,43 @@ dirty tree, no failing gate. A worker here would be activity without evidence.
 emulator run. The accessibility bridge is verified by tests against a mocked
 channel plus CI, never by an observed gesture on hardware. No claim is made here
 that one exists. This is the one thing a green CI badge does not cover.
+
+---
+
+## Heartbeat 2026-09-29 ~14:40 UTC — idle; docs-only CI skip now proven on a 4th commit
+
+Measured this run, nothing inherited:
+
+- `git status --porcelain` — 0 lines. `main` = `origin/main` = `f121ee9`
+  ("docs(self-review): record the 11:40 idle heartbeat and unchanged empty
+  no-merged set", 2026-09-29 ~11:40 UTC). Ahead/behind vs origin: 0/0.
+- `gh run list --commit f121ee9` — 0 runs. The `paths-ignore: '**/*.md'` from
+  `de8838f` now holds for a real self-review commit, not just the two that
+  proved it deliberately. Newest workflow run is still **36462073637** on
+  `de8838f` (success, 3m12s). The doc-commit CI loop is genuinely closed.
+- `git worktree list` — 1 entry, the main checkout. No `/tmp/noir-wt-*` dir
+  exists; the three `/tmp/noir-wt-*-analyze.log` files are stale artifacts from
+  2026-09-26 08:29 and belong to worktrees that no longer exist. The pre-run
+  script's six "worktree missing" lines are correct about the worktrees and
+  silent about the cause: no work was ever dispatched this cycle.
+- `ps -eo cmd | grep -E "opencode|claude|flutter|dart|gradle"` — 0 workers.
+- `git branch --no-merged main` — empty. All 23 local branches are 0 ahead;
+  `feature/night-automations` is closest at 2 behind, then
+  `fix/command-centre-confirmation-card` at 13, `gateverdict-tests` at 26.
+  Nothing anywhere holds unique work.
+- `main` carries 80 `lib/` Dart files, 51 `*_test.dart` files (59 files under
+  `test/`), 12 Kotlin files.
+
+**Nothing was dispatched.** No branch holds unique work, no unmerged commit, no
+dirty tree, no failing gate. A worker here would be activity without evidence.
+
+**Correction to the ~11:40 entry:** it attributed the 0-run result to the
+`paths-ignore` holding "for a third Markdown-only commit". The mechanism is the
+same but the count was off by one — this is the fourth post-`de8838f`
+Markdown-only commit to produce 0 runs, and the first one recorded as a
+routine heartbeat rather than a deliberate proof.
+
+**Standing gap, unchanged and not closable on this host:** no device or
+emulator run. The accessibility bridge is verified by tests against a mocked
+channel plus CI, never by an observed gesture on hardware. No claim is made here
+that one exists. This is the one thing a green CI badge does not cover.

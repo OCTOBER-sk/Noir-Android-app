@@ -54,7 +54,8 @@ void main() {
 
   /// The card's own copy, so a wording change is a deliberate edit here rather
   /// than a silent one that leaves the test green for the wrong reason.
-  const String staleClaim = 'Disabled: no policy gate is wired to this card yet.';
+  const String staleClaim =
+      'Disabled: no policy gate is wired to this card yet.';
 
   /// What `runAutomation` really publishes for one gated run: the same shape
   /// `taskRun.announceConfirmation` builds, so the card sees production fields.
@@ -86,10 +87,7 @@ void main() {
       List<(PendingConfirmation, bool)> answered,
     })
   >
-  pumpScreen(
-    WidgetTester tester, {
-    bool withHandler = true,
-  }) async {
+  pumpScreen(WidgetTester tester, {bool withHandler = true}) async {
     final controller = ConversationController();
     addTearDown(controller.close);
     final events = FakeStateSource<NoirUiEvent>();
@@ -113,11 +111,7 @@ void main() {
         ),
       ),
     );
-    return (
-      events: events,
-      confirmations: confirmations,
-      answered: answered,
-    );
+    return (events: events, confirmations: confirmations, answered: answered);
   }
 
   /// Stream delivery is asynchronous, so each push needs its own pump.
@@ -153,9 +147,14 @@ void main() {
   /// test could not reach to dispose, and the extra failure would bury the
   /// assertion that actually matters.
   bool enabled(WidgetTester tester, Key key) {
-    final SemanticsProperties properties =
-        tester.widget<Semantics>(find.byKey(key)).properties;
-    expect(properties.button, isTrue, reason: '$key must be announced as a button');
+    final SemanticsProperties properties = tester
+        .widget<Semantics>(find.byKey(key))
+        .properties;
+    expect(
+      properties.button,
+      isTrue,
+      reason: '$key must be announced as a button',
+    );
     return properties.enabled ?? false;
   }
 
@@ -249,7 +248,9 @@ void main() {
       expect(pending.answerValue, isTrue);
     });
 
-    testWidgets('an already-answered request is not answerable', (tester) async {
+    testWidgets('an already-answered request is not answerable', (
+      tester,
+    ) async {
       final harness = await pumpScreen(tester);
       final PendingConfirmation pending = request();
       // The gate gave up waiting: another holder, or the timeout, answered it.
@@ -299,7 +300,8 @@ void main() {
       expect(
         find.textContaining('Operations'),
         findsOneWidget,
-        reason: 'with nothing connected, the card must name the screen that '
+        reason:
+            'with nothing connected, the card must name the screen that '
             'does hold the request',
       );
     });
@@ -356,9 +358,15 @@ void main() {
       );
       await tester.tap(find.byKey(confirm));
       await tester.pump();
-      expect(pending.answerValue, isTrue, reason: 'a stale card cannot re-answer');
       expect(
-        find.text('This request was answered: refused or expired, so nothing runs.'),
+        pending.answerValue,
+        isTrue,
+        reason: 'a stale card cannot re-answer',
+      );
+      expect(
+        find.text(
+          'This request was answered: refused or expired, so nothing runs.',
+        ),
         findsNothing,
         reason: 'a tap that changes nothing must not restate the request',
       );

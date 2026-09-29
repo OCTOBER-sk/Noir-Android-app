@@ -65,16 +65,17 @@ void main() {
       for (final FileSystemEntity entity in lib.listSync(recursive: true)) {
         if (entity is! File || !entity.path.endsWith('.dart')) continue;
         if (entity.path.contains('/theme/')) continue; // the definition itself
-        final int hits = RegExp('NoirColors\\.rainbowAccent')
-            .allMatches(entity.readAsStringSync())
-            .length;
+        final int hits = RegExp(
+          'NoirColors\\.rainbowAccent',
+        ).allMatches(entity.readAsStringSync()).length;
         if (hits > 0) found[entity.path] = hits;
       }
 
       expect(
         found,
         equals(authorized),
-        reason: 'NoirColors.rainbowAccent must appear only on the three spots '
+        reason:
+            'NoirColors.rainbowAccent must appear only on the three spots '
             'FRONTEND_PLAN.md authorizes. A new call site is either a fourth '
             'spot or a duplicate -- either way the deviation has grown.',
       );
@@ -90,18 +91,21 @@ void main() {
       // animating it would make a scannable marker distract. The two bars that
       // do carry meaning -- the loader tip and the undo countdown -- must go
       // through the shared _cyclingAccent helper.
-      final String cc =
-          File('lib/ui/command_centre_screen.dart').readAsStringSync();
+      final String cc = File(
+        'lib/ui/command_centre_screen.dart',
+      ).readAsStringSync();
       expect(
         RegExp('gradient: _cyclingAccent\\(').allMatches(cc).length,
         2,
-        reason: 'The loader tip and the undo countdown must both animate the '
+        reason:
+            'The loader tip and the undo countdown must both animate the '
             'accent through _cyclingAccent.',
       );
       expect(
         RegExp('colors: NoirColors\\.rainbowAccent').allMatches(cc).length,
         0,
-        reason: 'command_centre_screen.dart must paint the accent through '
+        reason:
+            'command_centre_screen.dart must paint the accent through '
             '_cyclingAccent, not through a raw static gradient.',
       );
     });

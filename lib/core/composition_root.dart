@@ -1312,9 +1312,7 @@ class NoirComposition extends ChangeNotifier {
     // token. `estimatedTokens` is the real spend so far today, not a guess.
     unawaited(
       _usedToday().then((int usedToday) {
-        taskRun.emit(
-          CostEstimateResolved(wired.settings.id, model, usedToday),
-        );
+        taskRun.emit(CostEstimateResolved(wired.settings.id, model, usedToday));
       }),
     );
     return _replyFor(wired, model, prompt);

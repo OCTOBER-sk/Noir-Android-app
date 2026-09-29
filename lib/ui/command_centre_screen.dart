@@ -406,7 +406,8 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
       // rest of the session. Both are kept: a completed tool call stops the
       // loader, and the undo window still does too for the paths that never
       // reach a tool.
-      if (event is ToolCallCompleted || event is ActionCompletedWithUndoWindow) {
+      if (event is ToolCallCompleted ||
+          event is ActionCompletedWithUndoWindow) {
         _showSkeleton = false;
       }
     });

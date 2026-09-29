@@ -122,6 +122,14 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get --enforce-lockfile
 
+      - name: Check formatting
+        # `--set-exit-if-changed` makes a non-conformant file a build failure
+        # rather than a rewrite: a gate that silently reformats code on the
+        # runner is a gate that reports success on a tree nobody reviewed.
+        # `lib test` are the two roots the Dart SDK actually formats; the
+        # Kotlin under android/ is governed by the Gradle suite, not here.
+        run: dart format --output=none --set-exit-if-changed lib test
+
       - name: Analyze
         run: flutter analyze
 

@@ -61,22 +61,24 @@ void main() {
     expect(SettingsScreen, isNotNull);
   });
 
-  test('saving a provider and an API key puts both in the real store',
-      () async {
-    await layer.settings.upsert(screenRecord());
-    await layer.settings.setSecret('primary', 'test-key-value');
+  test(
+    'saving a provider and an API key puts both in the real store',
+    () async {
+      await layer.settings.upsert(screenRecord());
+      await layer.settings.setSecret('primary', 'test-key-value');
 
-    final all = await layer.settings.readAll();
-    expect(all, hasLength(1));
-    expect(all.single.displayName, 'My gateway');
-    expect(all.single.baseUrl, 'https://api.example.com/v1');
-    expect(all.single.defaultModel, 'vendor/model-a');
-    expect(all.single.hasSecret, isTrue);
+      final all = await layer.settings.readAll();
+      expect(all, hasLength(1));
+      expect(all.single.displayName, 'My gateway');
+      expect(all.single.baseUrl, 'https://api.example.com/v1');
+      expect(all.single.defaultModel, 'vendor/model-a');
+      expect(all.single.hasSecret, isTrue);
 
-    // The key is readable by the one component allowed to read it — the
-    // provider adapter. Nothing else may hold a copy.
-    expect(await layer.settings.resolveSecret('primary'), 'test-key-value');
-  });
+      // The key is readable by the one component allowed to read it — the
+      // provider adapter. Nothing else may hold a copy.
+      expect(await layer.settings.resolveSecret('primary'), 'test-key-value');
+    },
+  );
 
   test('the stored record never contains the secret value', () async {
     await layer.settings.upsert(screenRecord());
@@ -91,30 +93,28 @@ void main() {
     expect(redacted['secretConfigured'], isTrue);
   });
 
-  test('an invalid base URL is rejected by the record, not silently stored',
-      () async {
-    // The screen hands typed values straight to the repository, so the
-    // repository's own validation is the only guard. It must reject.
-    expect(
-      () => screenRecord(baseUrl: 'not-a-url'),
-      throwsA(isA<InvalidDataError>()),
-    );
-    expect(await layer.settings.readAll(), isEmpty);
-  });
+  test(
+    'an invalid base URL is rejected by the record, not silently stored',
+    () async {
+      // The screen hands typed values straight to the repository, so the
+      // repository's own validation is the only guard. It must reject.
+      expect(
+        () => screenRecord(baseUrl: 'not-a-url'),
+        throwsA(isA<InvalidDataError>()),
+      );
+      expect(await layer.settings.readAll(), isEmpty);
+    },
+  );
 
   test('a blank model is rejected too', () {
-    expect(
-      () => screenRecord(model: '   '),
-      throwsA(isA<InvalidDataError>()),
-    );
+    expect(() => screenRecord(model: '   '), throwsA(isA<InvalidDataError>()));
   });
 
   test('a blank display name falls back rather than failing the save', () {
     expect(screenRecord(name: '   ').displayName, 'My provider');
   });
 
-  test('a saved key can be forgotten, and the store really drops it',
-      () async {
+  test('a saved key can be forgotten, and the store really drops it', () async {
     await layer.settings.upsert(screenRecord());
     await layer.settings.setSecret('primary', 'test-key-value');
     expect((await layer.settings.readAll()).single.hasSecret, isTrue);

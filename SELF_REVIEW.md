@@ -804,3 +804,34 @@ activity without evidence. `main` carries 80 `lib/` Dart files and 51 tests.
 emulator run. The accessibility bridge is verified by tests against a mocked
 channel plus CI, never by an observed gesture on hardware. No claim is made here
 that one exists. This is the one thing a green CI badge does not cover.
+
+---
+
+## Heartbeat 2026-09-29 ~11:40 UTC — still idle; main advanced docs-only
+
+Measured this run, nothing inherited:
+
+- `git status --porcelain` — 0 lines. `main` = `origin/main` = `fab4ed2`
+  ("docs(self-review): record empty no-merged set and idle dispatch",
+  2026-09-29 10:07 UTC). One commit ahead of the `67a1983` recorded at the
+  ~02:35 heartbeat; it touches only `SELF_REVIEW.md`.
+- `git worktree list` — 1 entry, the main checkout. No `/tmp/noir-wt-*` exists,
+  so the script's six "worktree missing" lines are accurate about the worktrees
+  and misleading only about the cause.
+- `pgrep -af "opencode|flutter|dart|gradle"` — 0 workers; the only hit is this
+  heartbeat's own shell.
+- `gh run list --commit fab4ed2` — 0 runs. The docs-only `paths-ignore` from
+  `de8838f` holds for a third Markdown-only commit; newest workflow run is still
+  **36462073637** on `de8838f`.
+- `git branch --no-merged main` — empty, unchanged. All 21 local branches are
+  1–79 commits *behind* `main` and 0 ahead; `feature/night-automations` remains
+  the closest at 1 behind.
+- `main` carries 80 `lib/` Dart files and 59 test files.
+
+**Nothing was dispatched.** No branch holds unique work, no unmerged commit, no
+dirty tree, no failing gate. A worker here would be activity without evidence.
+
+**Standing gap, unchanged and not closable on this host:** no device or
+emulator run. The accessibility bridge is verified by tests against a mocked
+channel plus CI, never by an observed gesture on hardware. No claim is made here
+that one exists. This is the one thing a green CI badge does not cover.

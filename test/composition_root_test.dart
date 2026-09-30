@@ -1170,22 +1170,90 @@ void main() {
       expect((await run)!.blocked, isFalse);
 
       // The compensation is a different run, and the executor reported that
-      // nothing was dispatched for it. The A12 critic reads that off the
-      // outcome's own fields now, so the compensating run scores below the
-      // threshold and the pipeline routes it to A4 instead of reporting it as
-      // a success. That is the same defect this mapping was written to close:
-      // an `executed: false` outcome used to score 0.92.
+      // nothing was dispatched for it: no node on that screen matched, so it
+      // answered `executed: false` with the code that says so. The A12 critic
+      // reads that off the outcome's own fields, so the compensating run scores
+      // below the threshold and the pipeline routes it to A4 — an `executed:
+      // false` outcome used to score 0.92 and be reported as a success.
       //
-      // What the undo reports is therefore the recovery engine's block code
-      // rather than the executor's narrower `MALFORMED_GESTURE_TARGET`, because
-      // the recovery engine returns its own code and does not carry the outcome
-      // out with it. Recorded as an honest limit rather than worked around:
-      // the recovery engine's return value and the undo's refusal path are both
-      // out of scope for this change, and the refusal is still a real code from
-      // a real stage rather than one invented here.
+      // A4 ends the run as `RECOVERY_NEEDS_REVIEW`, which is a true statement
+      // about the run and a useless one to read: it does not say the
+      // compensation could not find anything to aim at. 50767f2 changed this
+      // expectation from `MALFORMED_GESTURE_TARGET` to `RECOVERY_NEEDS_REVIEW`
+      // and recorded the loss as a deliberate limit, because the recovery engine
+      // returned its own `GateResult` and dropped the executor's answer on the
+      // way out. That limit is what this branch removes: the reason now travels
+      // out beside the block code on `RuntimeResult.failureReason`, leaving the
+      // code itself — and the Safety Center row that reads it — exactly as 22ed024
+      // left it. So the assertion below is the *specific* one again, and it is
+      // specific because the executor said it, not because the undo invented it.
       expect(refused, isA<UndoRefused>());
-      expect((refused as UndoRefused).reason, 'RECOVERY_NEEDS_REVIEW');
+      expect((refused as UndoRefused).reason, kCodeMalformedGestureTarget);
     });
+
+    test(
+      'a compensation the platform failed reports the platform\'s own code',
+      () async {
+        // A different way for a compensation to fail, so the reason the toast
+        // shows is read from the platform's report rather than from the
+        // executor's own pre-dispatch refusal: the first gesture (the action
+        // being compensated) lands, and the second — `navigate_back` — is
+        // dispatched and then fails, which is the `PlatformException` shape
+        // `NativeBridge.dispatchGesture` turns into a not-executed outcome
+        // carrying the code.
+        int sent = 0;
+        platform.install(<String, Future<Object?> Function(MethodCall call)>{
+          kMethodServiceStatus: (MethodCall call) async =>
+              _connectedStatus(nodeCount: _undoDump().length),
+          kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
+            'nodes': _undoDump(),
+            'nodeCount': _undoDump().length,
+          },
+          kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
+            'allowed': true,
+            'message': 'ok',
+          },
+          kMethodDispatchGesture: (MethodCall call) async {
+            sent += 1;
+            if (sent == 1) return <String, dynamic>{'executed': true};
+            throw PlatformException(code: kCodeNativeDispatchFailed);
+          },
+        });
+        final NoirComposition app = await open(bridge: bridge);
+        addTearDown(app.dispose);
+        final List<ActionCompletedWithUndoWindow> announced = announcements(
+          app,
+        );
+
+        final Future<RuntimeResult?> run = await launch(
+          app,
+          const AutomationRequest(action: 'navigate', input: 'Send message'),
+        );
+        while (announced.isEmpty) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        final Future<UndoResult> undo = app.undo(announced.single.actionId);
+        (await app.confirmations.first).answer(true);
+
+        final UndoResult refused = await undo;
+        expect((await run)!.blocked, isFalse);
+        expect(
+          dispatches(),
+          hasLength(2),
+          reason: 'the action and the compensation',
+        );
+
+        // The compensation really did go to A4, which is where the reason is
+        // read from: a run that was not recovered could not have carried one.
+        expect(app.recovery.auditTrail, hasLength(1));
+        expect(app.taskRun.state, TaskState.failed);
+
+        // The platform's own code, and not the recovery engine's blanket one:
+        // both are true of this run, and only one of them says what went wrong.
+        expect(refused, isA<UndoRefused>());
+        expect((refused as UndoRefused).reason, kCodeNativeDispatchFailed);
+      },
+    );
   });
 
   group('nothing in the new code is a stub', () {

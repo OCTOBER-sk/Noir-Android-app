@@ -88,8 +88,13 @@ void main() {
   ///
   /// The reflection is supplied rather than produced, so the assertions below
   /// are about one known record — the header explains why. `executed` is null
-  /// because the engine does not read it: it is the observation the critic
-  /// already read, and the record it produced is what the engine is handed.
+  /// here because this file is about the *display* of a record, not about what
+  /// produced one: there is no executor answer to hand it, and the engine reads
+  /// the answer for exactly one thing now, which is whether it can name a
+  /// specific reason. Null carries no reason, so what the Safety Center is
+  /// asserted against below is the bare `RECOVERY_NEEDS_REVIEW` run, and the
+  /// test that a reason travels beside it without touching the row lives in
+  /// test/composition_root_test.dart, where a real failed run produces one.
   Future<RuntimeResult> runRecovery() =>
       app.recovery.executeReflectionRecovery(Reflection(confidence: 0.3), null);
 
@@ -157,6 +162,16 @@ void main() {
         expect(result.blocked, isTrue);
         expect((result.result as GateResult).message, 'RECOVERY_NEEDS_REVIEW');
         expect(app.taskRun.state, TaskState.failed);
+        // This run had no executor answer, so it names no specific reason, and
+        // none is made up. The row above is therefore the whole of what a
+        // recovery run reports when nothing downstream of the executor had
+        // anything to say — the reason a *reasoned* recovery run carries rides
+        // beside this code and is not folded into it.
+        expect(
+          result.failureReason,
+          isNull,
+          reason: 'a recovery run with no reason to report invents none',
+        );
       },
     );
   });

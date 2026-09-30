@@ -197,6 +197,12 @@ const double kConfidenceConfirmed = 0.92;
 /// A report that is not an [ExecutionSignal] has no code to read, and a blank one
 /// says nothing, so neither is reported as a failure. Only a code the platform
 /// actually wrote counts.
+///
+/// This asks the *platform* a question, and that is the difference from
+/// [reportedBlockReason]: a run the gate stopped never reached the platform, so
+/// it has no [ExecutionSignal.platformCode] and scores one rung lower here than
+/// it would be reported by. The rung is about what the platform said; the reason
+/// is about what went wrong.
 String? _reportedFailureCode(Object? outcome) {
   if (outcome is! ExecutionSignal) return null;
   final String code = outcome.platformCode?.trim() ?? '';
@@ -270,11 +276,28 @@ class RuntimeResult {
   /// the critic.
   final ReflectionEvent? reflectionEvent;
 
+  /// The specific reason this run did not do what it claimed, when the stage
+  /// that ended it could name one.
+  ///
+  /// It travels *beside* [result] rather than inside it. A recovery run has to
+  /// keep the block code it already returns — `RECOVERY_NEEDS_REVIEW` is what
+  /// the Safety Center's row means, and the audit entry beside it is the same
+  /// fact — so the reason the executor gave rides alongside that code instead of
+  /// being written over it. A reader that wants the specific answer takes this;
+  /// a reader that wants the stage's own answer takes [result].
+  ///
+  /// Null is the default and is meant: a run blocked before execution carries
+  /// nothing here, a success carries nothing here, and so does a recovery run
+  /// entered for a reason that is not an executor failure. Nothing is invented
+  /// for those, and a reader that finds nothing falls back to the [GateResult].
+  final String? failureReason;
+
   RuntimeResult.success(this.result, this.reflection)
     : blocked = false,
-      reflectionEvent = null;
+      reflectionEvent = null,
+      failureReason = null;
 
-  RuntimeResult.blocked(GateResult policy)
+  RuntimeResult.blocked(GateResult policy, {this.failureReason})
     : blocked = true,
       result = policy,
       reflection = null,
@@ -283,11 +306,17 @@ class RuntimeResult {
   /// The same outcome, carrying the reflection event the pipeline just built.
   /// Used on the recovery path, where the [RecoveryEngine] returns a result
   /// and the pipeline still owes the caller the event for that run.
+  ///
+  /// [failureReason] is carried across with it. The recovery hop is the one hop
+  /// where this field is ever set, and dropping it here would quietly undo the
+  /// whole point for every caller that reaches the result through the pipeline
+  /// rather than by calling the engine directly.
   RuntimeResult withReflectionEvent(ReflectionEvent event) => RuntimeResult._(
     blocked: blocked,
     result: result,
     reflection: reflection,
     reflectionEvent: event,
+    failureReason: failureReason,
   );
 
   RuntimeResult._({
@@ -295,6 +324,7 @@ class RuntimeResult {
     required this.result,
     required this.reflection,
     required this.reflectionEvent,
+    required this.failureReason,
   });
 }
 
@@ -399,6 +429,22 @@ abstract class ExecutionSignal extends ExecutionReport {
   /// The platform's own code for a run that did not happen, verbatim, or null
   /// when it reported none.
   String? get platformCode;
+
+  /// Why this run did not happen, in the identifier the stage that stopped it
+  /// used, or null when nothing that produced this signal named one.
+  ///
+  /// This is a narrower question than [platformCode] asked of the platform, and
+  /// it can have a different answer. The platform is one stage that can stop a
+  /// run; the gate is another, and a gate refusal never reaches the platform, so
+  /// it arrives with no [platformCode] at all and the gate's own message is the
+  /// only reason there is. Read this for what to *tell someone* about a run that
+  /// did not happen, and [platformCode] for whether the platform itself said so.
+  ///
+  /// Read it only on a run that did not happen: for a confirmed run the question
+  /// does not apply. [NativeGestureOutcome] never answers null, because it fails
+  /// closed to a code rather than to silence, and a silent failure is not a
+  /// reason a person can act on.
+  String? get blockReason;
 }
 
 /// Whether [outcome] is the executor confirming that the action happened.
@@ -408,6 +454,34 @@ abstract class ExecutionSignal extends ExecutionReport {
 /// completion that did not happen and offer a control with nothing behind it.
 bool executionConfirmed(Object? outcome) =>
     outcome is ExecutionReport ? outcome.executed : false;
+
+/// The specific reason an execution answer says a run did not happen, or null
+/// when it does not carry one.
+///
+/// Read structurally, through [ExecutionSignal], and never off a rendering of the
+/// value: the shipped answer is a `NativeGestureOutcome`, whose default
+/// `toString` says nothing about anything, which is how the A12 critic used to be
+/// unable to read a failure at all. This is the reader 50767f2's rung test and
+/// the A4 recovery path share, so a run is diagnosed the same way whichever
+/// stage asks.
+///
+/// The reason is reported only when the signal genuinely carries one:
+///
+///   * an answer that is not an [ExecutionSignal] has claimed nothing, so
+///     nothing is reported;
+///   * a run the platform *confirmed* has no failure to explain, so nothing is
+///     reported — the question does not apply to it;
+///   * a blank reason is silence, and silence is not a diagnosis.
+///
+/// A recovery run can be entered for a reason that is not an executor failure at
+/// all. Nothing is invented for that case: the caller's own answer is still the
+/// honest one, and this returns null so the caller keeps it.
+String? reportedBlockReason(Object? executed) {
+  if (executed is! ExecutionSignal) return null;
+  if (executionConfirmed(executed)) return null;
+  final String reason = executed.blockReason?.trim() ?? '';
+  return reason.isEmpty ? null : reason;
+}
 
 /// The inverse action an undo dispatches, as data and nothing else.
 ///

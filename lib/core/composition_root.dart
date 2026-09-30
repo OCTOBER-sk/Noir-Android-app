@@ -1492,16 +1492,27 @@ class NoirComposition extends ChangeNotifier {
   ///
   /// A null result is the run never reaching an outcome at all — the screen
   /// could not be read, or the pipeline threw — and is reported as such rather
-  /// than as a success. A blocked run is reported with the reason the gate gave.
+  /// than as a success. A blocked run is reported with the reason the stage that
+  /// stopped it gave, and where that stage could name a *specific* reason it is
+  /// reported in preference to its own block code: a recovery run is a real code,
+  /// but it is not an answer, and `MALFORMED_GESTURE_TARGET` is.
   UndoResult _undoResult(String actionId, RuntimeResult? result) {
     if (result == null) return const UndoRefused(kUndoCouldNotRun);
     final Object? outcome = result.result;
     if (result.blocked) {
       if (outcome is GateResult && outcome.allowed) {
         // The policy allowed the compensation and nobody answered the gate: the
-        // gate's own bound produced this, and silence is a refusal.
+        // gate's own bound produced this, and silence is a refusal. Checked
+        // before any carried reason, because nobody answering is a fact about
+        // this press rather than about the run the reason would describe.
         return const UndoRefused(kUndoNotApproved);
       }
+      // Carried, not parsed: the reason was read off the executor's own answer
+      // by the stage that held it, and is null whenever that answer did not
+      // genuinely name one — so the block code below stays the honest fallback
+      // rather than a guess at what went wrong.
+      final String? reason = result.failureReason;
+      if (reason != null) return UndoRefused(reason);
       return UndoRefused(
         outcome is GateResult ? outcome.message : kUndoCouldNotRun,
       );

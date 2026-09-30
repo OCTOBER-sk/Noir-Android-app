@@ -323,6 +323,104 @@ void main() {
     });
   });
 
+  // The gap the last entry recorded as a deliberate limit: A4 ends a failed run
+  // as `RECOVERY_NEEDS_REVIEW`, and it returned that `GateResult` and nothing
+  // else, so the executor's own reason — `MALFORMED_GESTURE_TARGET`,
+  // `POLICY_BLOCKED`, a platform code — was dropped on the way out. The reason
+  // now rides out beside the code on `RuntimeResult.failureReason`.
+  //
+  // These tests drive the *real* `SanitizingRecoveryEngine` through the real
+  // pipeline rather than a recording stand-in, because the two things worth
+  // pinning are the engine's own return value and the pipeline's `await`: the
+  // reason has to survive `withReflectionEvent`, which is the hop every caller
+  // that reaches recovery through `runAutomation` actually goes over.
+  group('the recovery path carries the executor\'s reason out', () {
+    /// The real engine, on a real task controller, with no audit sink — nothing
+    /// here is listening for the Safety Center row, which is asserted where the
+    /// graph is really wired (test/integration/recovery_audit_surface_test.dart
+    /// and test/composition_root_test.dart).
+    SanitizingRecoveryEngine realRecovery() =>
+        SanitizingRecoveryEngine(tasks: TaskController(taskId: 'task-reason'));
+
+    test(
+      'a platform failure is reported under the code the platform wrote',
+      () async {
+        final SanitizingRecoveryEngine recovery = realRecovery();
+
+        final RuntimeResult result = await _pipeline(
+          executed: _dispatchFailed,
+          policyEngine: PolicyEngine(),
+          recovery: recovery,
+        ).run(null);
+
+        expect(result.blocked, isTrue);
+        expect(result.failureReason, kCodeNativeDispatchFailed);
+        // The engine's own answer is untouched, which is the whole point of
+        // carrying a second reading beside it rather than over it: the Safety
+        // Center's row means `RECOVERY_NEEDS_REVIEW` and still does.
+        expect((result.result as GateResult).message, 'RECOVERY_NEEDS_REVIEW');
+        // And the audit record is the one the run produced, as before.
+        expect(recovery.auditTrail.single['confidenceScore'], 30);
+      },
+    );
+
+    test('a gate refusal is reported under the gate\'s own message', () async {
+      // The case a `platformCode`-only reader gets wrong. Nothing was
+      // dispatched, so the platform was never asked and there is no platform
+      // code to read: the only reason that exists is the gate's own message,
+      // and it is narrower and more useful than the recovery engine's blanket
+      // code.
+      final SanitizingRecoveryEngine recovery = realRecovery();
+
+      final RuntimeResult result = await _pipeline(
+        executed: _refused,
+        policyEngine: PolicyEngine(),
+        recovery: recovery,
+      ).run(null);
+
+      expect(result.failureReason, kCodeConfirmationRequired);
+      expect((result.result as GateResult).message, 'RECOVERY_NEEDS_REVIEW');
+    });
+
+    test('an answer nothing can read carries no reason at all', () async {
+      // The inverted assertion, and the one that would fail if the reason were
+      // ever sniffed off a rendering again: `'action failed'` reaches recovery —
+      // it scores `kConfidenceNoObservation` — and the reason it carries is
+      // none. There is no code to report here, so the caller keeps the recovery
+      // engine's own answer rather than being handed a string the platform
+      // never wrote.
+      final SanitizingRecoveryEngine recovery = realRecovery();
+
+      final RuntimeResult result = await _pipeline(
+        executed: 'action failed',
+        policyEngine: PolicyEngine(),
+        recovery: recovery,
+      ).run(null);
+
+      expect(result.blocked, isTrue);
+      expect(result.failureReason, isNull);
+      expect((result.result as GateResult).message, 'RECOVERY_NEEDS_REVIEW');
+    });
+
+    test('a confirmed run is not recovered, and needs no reason', () async {
+      final SanitizingRecoveryEngine recovery = realRecovery();
+
+      final RuntimeResult result = await _pipeline(
+        executed: _executed,
+        policyEngine: PolicyEngine(),
+        recovery: recovery,
+      ).run(null);
+
+      expect(recovery.auditTrail, isEmpty);
+      expect(result.blocked, isFalse);
+      expect(
+        result.failureReason,
+        isNull,
+        reason: 'nothing failed, so there is no failure reason to carry',
+      );
+    });
+  });
+
   group('UndoWindow counts down for real', () {
     test('isActive() is true before the deadline and false after it', () {
       final DateTime start = DateTime.utc(2026, 1, 1, 12);

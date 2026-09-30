@@ -91,6 +91,29 @@ final NativeGestureOutcome _noPlatform = NativeGestureOutcome.blocked(
   platformCode: kCodeNativeBridgeUnavailable,
 );
 
+/// A signal that is not the platform's own type, carrying a reason of its own.
+///
+/// `lib/platform/` is the only place that may build one of these in the app, so
+/// this exists to show the reason is read off the *interface* — a type that
+/// implements [ExecutionSignal] and nothing else is enough, and nothing about
+/// `NativeGestureOutcome` is being read behind it.
+class _ForeignSignal implements ExecutionSignal {
+  const _ForeignSignal({required this.executed, this.reason});
+
+  @override
+  final bool executed;
+  final String? reason;
+
+  @override
+  bool? get gateGranted => executed;
+
+  @override
+  String? get platformCode => reason;
+
+  @override
+  String? get blockReason => reason;
+}
+
 Future<double> confidenceFor(
   dynamic executed, {
   List<Map<String, dynamic>>? dump,
@@ -286,5 +309,82 @@ void main() {
         );
       },
     );
+  });
+
+  // The same read, one stage later. The critic answers "how much did this run
+  // learn"; the A4 recovery path answers "what do we tell the person whose
+  // gesture it was" — and both answers come off the same signal, through the same
+  // interface, for the same reason: a rendering of a value is not evidence about
+  // the screen. `_reportedFailureCode` and `reportedBlockReason` are deliberately
+  // different questions, though — the first asks what the *platform* said, the
+  // second asks what went wrong — and the pair below is where that difference is
+  // visible: a gate refusal has a reason and no platform code.
+  group('the reason is read off the signal, not off a rendering', () {
+    test('a platform failure is reported under the platform\'s code', () {
+      expect(reportedBlockReason(_dispatchFailed), kCodeNativeDispatchFailed);
+      expect(reportedBlockReason(_noPlatform), kCodeNativeBridgeUnavailable);
+    });
+
+    test('a gate refusal is reported under the gate\'s own message', () {
+      // No gesture was dispatched, so the platform was never asked and there is
+      // no `platformCode` to read. The gate's message is the only reason there
+      // is, and dropping it would report nothing at all for this run.
+      expect(reportedBlockReason(_refused), kCodeConfirmationRequired);
+    });
+
+    test('a run the platform confirmed has no reason to report', () {
+      // The question does not apply to it: nothing failed, so there is nothing
+      // to explain. Reporting a code here would be inventing one.
+      expect(reportedBlockReason(_confirmed), isNull);
+    });
+
+    test('an answer that is not a signal reports nothing', () {
+      // `'action failed'` is the assertion that matters: it reads like a
+      // failure, and the old critic scored it as one off the substring. It
+      // carries no code, so no reason is reported for it.
+      expect(reportedBlockReason('action failed'), isNull);
+      expect(reportedBlockReason('sent'), isNull);
+      expect(reportedBlockReason(null), isNull);
+      expect(reportedBlockReason(<String, dynamic>{'executed': false}), isNull);
+    });
+
+    test('a blank reason is silence, and silence is not a diagnosis', () {
+      // `verdict.message` and `platformCode` are both plain Strings, so a blank
+      // one is a real state a bridge can build. Reporting it would put an empty
+      // string where a code belongs, which reads to a user as a run that failed
+      // for no stated reason — true, and useless.
+      final NativeGestureOutcome blank = NativeGestureOutcome.blocked(
+        const NativeGateVerdict.blocked('   '),
+        platformCode: '   ',
+      );
+      expect(blank.blockReason.trim(), isEmpty);
+      expect(reportedBlockReason(blank), isNull);
+    });
+
+    test('the interface carries the reason, not the platform type', () {
+      // `lib/platform/` is the only place in the app that may build a signal, so
+      // this asserts the reader is not reaching past the interface for one: a
+      // type that implements `ExecutionSignal` and knows nothing about
+      // `NativeGestureOutcome` is read exactly the same way.
+      expect(
+        reportedBlockReason(
+          const _ForeignSignal(executed: false, reason: 'SOMETHING_NAMED'),
+        ),
+        'SOMETHING_NAMED',
+      );
+      // Including when it declines to name one: a signal is entitled to say
+      // nothing, and a reader that required a reason would have to invent it.
+      expect(
+        reportedBlockReason(const _ForeignSignal(executed: false)),
+        isNull,
+      );
+      expect(
+        reportedBlockReason(
+          const _ForeignSignal(executed: true, reason: 'IGNORED'),
+        ),
+        isNull,
+        reason: 'a confirmed run has no failure reason to carry',
+      );
+    });
   });
 }

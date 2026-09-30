@@ -1461,3 +1461,283 @@ integrated nothing.
 
 **Standing gap, unchanged:** still no device or emulator run, and still no
 implementation work outstanding from the branches.
+
+---
+
+## Recovery e2e: the A4 audit record is now produced by a real run
+
+Branch `feature/recovery-e2e`, cut from `main` at `373fc58`. Two test files
+changed, **no file under `lib/` changed** (`git diff lib/` is empty after the
+work, including after the mutations below were reverted).
+
+### The claim, and whether it is true
+
+`test/integration/recovery_audit_surface_test.dart` used to call
+`app.recovery.executeReflectionRecovery(Reflection(confidence: 0.3), null)` by
+hand, because the A12 critic scored a run with
+`executed.toString().contains('failed')` and the shipped executor answers with a
+`NativeGestureOutcome`, whose default `toString` says nothing — so
+`confidence < 0.5` could not be true on any real run. `50767f2` replaced that
+with a named ladder read off the outcome's own fields.
+
+**The production path genuinely reaches recovery, and that was confirmed by
+execution before a line of test was written.** A scratch probe
+(`test/zz_probe_scratch_test.dart`, run and then deleted) drove a real
+`NoirComposition` opened over a real temp workspace, with only the platform
+`MethodChannel` stubbed, and printed what the run actually did:
+
+```
+PROBE A dispatched=[dispatchGesture]
+PROBE A confidence=0.3 degraded=true
+PROBE A blocked=true code=RECOVERY_NEEDS_REVIEW failureReason=NATIVE_DISPATCH_FAILED
+PROBE A taskState=TaskState.failed auditTrail=[{taskId: task-1, confidenceScore: 30,
+        recoveryPath: re-execute-with-sanitized-screen-content,
+        sanitizedScreenUsed: true, timestamp: 2026-09-30T12:02:53.059262}]
+PROBE A logKinds=[SafetyEventKind.policy, SafetyEventKind.policy,
+        SafetyEventKind.confirmation, SafetyEventKind.policy,
+        SafetyEventKind.confirmation, SafetyEventKind.recovery]
+PROBE A recoveryEvents=[Low-confidence reflection needs review | task task-1,
+        confidence 30/100, path re-execute-with-sanitized-screen-content,
+        sanitized screen used: true]
+PROBE B dispatched=[]   confidence=0.2 blocked=true reason=MALFORMED_GESTURE_TARGET audit=1
+PROBE C dispatched=[]   confidence=null blocked=true
+        code=Confirmation required: delete_note audit=0
+PROBE D dispatched=[dispatchGesture] confidence=0.6 blocked=false
+        state=TaskState.completed audit=0
+00:05 +4: All tests passed!
+```
+
+The gesture really was dispatched (`dispatchGesture` reached the channel), the
+platform really failed it, and the record the Safety Center shows came out of
+that run. Nothing was faked and the recovery engine was never called by hand.
+
+**One correction to the task's narrative, which was checked rather than
+assumed.** It said "a gate refusal or a malformed gesture target produces a
+`NativeGestureOutcome` with `executed: false` and a real `platformCode`". Only
+half of that is true:
+
+- A `PolicyEngine` refusal (PROBE C, `delete_note` at risk 3) and a
+  `ConsentGate` refusal both return `RuntimeResult.blocked` at
+  `lib/agent/agent_runtime.dart:60` and `:70`, **before** `execute.run` is ever
+  called. The critic is not reached at all — `reflectionEvent` is null and no
+  audit entry is produced. A gate refusal does not go to recovery; it is
+  already blocked.
+- An executor-level refusal — no live approval (`CONFIRMATION_REQUIRED`) or an
+  unresolvable target (`MALFORMED_GESTURE_TARGET`, PROBE B) — *does* reach the
+  critic, but `NativeGestureExecutor.run` builds those outcomes without a
+  `platformCode`, so they score `kConfidenceNotExecuted` (0.20), not 0.30.
+
+The `kConfidencePlatformErrorCode` (0.30) rung is reachable only when the
+platform bridge's own `dispatchGesture` fails — a `PlatformException`, a
+`MissingPluginException`, or a reply whose `executed` is not `true`
+(`lib/platform/native_bridge.dart:464-495`). That is the case the new test
+drives, and it is the case that produces a row an operator can act on.
+
+### What changed in the tests
+
+`test/integration/support/noir_test_graph.dart` — added
+`failingDispatchDump()` (a two-node screen: one visible node the executor can
+resolve a gesture against, one zero-alpha node the A6a sanitizer strips) and
+`installFailingDispatchPlatformStub()`, which answers like a connected
+accessibility service and then throws the `PlatformException` that
+`AccessibilityService.dispatchGesture` produces when the system cancels a
+gesture. It returns a `FailingDispatchPlatform` that records the methods the
+graph asked for. This is the repo's established platform-substitution pattern,
+extended rather than replaced; `installConnectedPlatformStub` is untouched and
+still used by the other integration tests.
+
+`test/integration/recovery_audit_surface_test.dart` — the hand-call is gone.
+Nothing in the file constructs a `Reflection` or names the recovery engine any
+more; every run goes through `app.runAutomation`, the only entry point to the
+pipeline, and the only substituted thing beyond the platform is the answer to
+the confirmation the `ConsentGate` publishes — which in the app only the UI
+holds, and which is answered the way the Command Centre answers it. The new
+test asserts:
+
+- the run's confidence is below 0.5, and it is
+  `kConfidencePlatformErrorCode` — the rung the ladder names for "did not
+  happen, and the platform said why";
+- the platform really was asked to dispatch the gesture (so the score cannot be
+  an artefact of a run stopped earlier), and the run dispatched exactly once —
+  recovery never retries behind the gate;
+- the Safety Center's event stream carries a `SafetyEventKind.recovery` event
+  subscribed to *before* the run, whose badge, summary, detail, id and moment
+  are the recovery's own, and exactly one such event for one run;
+- the audit trail entry's fields are the recovery's own: the graph's task id,
+  a `confidenceScore` derived from *this run's* reflection and then pinned to
+  30, the real recovery path, `sanitizedScreenUsed: true`, and a `timestamp`
+  equal to the event's `occurredAt`;
+- `result.blocked`, the `RECOVERY_NEEDS_REVIEW` code, `TaskState.failed`, and
+  `result.failureReason == kCodeNativeDispatchFailed` — the reason travelling
+  beside the code rather than over it.
+
+The Safety Center widget test is now driven by that same real failing run
+(run from `setUp`, in the real zone, for the reason the header explains) and
+asserts the rendered row plus the audit panel's real A6a finding
+(`REASON_ZERO_ALPHA`, the stripped node's text). The "log is still honest when
+no recovery has run" group is unchanged, and now runs against a live platform
+that would have failed a gesture had one been dispatched.
+
+**The direct-call coverage was removed, and here is why that is a
+subsumption rather than a loss.** The hand-driven run and the driven run produce
+the same record from the same sources: the same `taskId` (the A5 controller's),
+the same `confidenceScore` (0.3 either way), the same `recoveryPath`, the same
+`sanitizedScreenUsed`, the same single `timestamp`. The one assertion that
+differed was `result.failureReason == isNull` — true only because the test had
+handed `executed` as `null`, i.e. it asserted the behaviour of a fixture rather
+than of the app. Driven for real it is `NATIVE_DISPATCH_FAILED`, which is the
+honest answer and the one the D15 undo toast consumes. The "a recovery run with
+nothing to report invents no reason" case is still covered, where it belongs, by
+`test/agent_runtime_truth_test.dart:385` ("an answer nothing can read carries no
+reason at all") and by `test/agent_runtime_critic_signal_test.dart:345-348`. The
+stale justification comment in the header was removed rather than left to
+describe a gap that no longer exists.
+
+### Test teeth — two mutations in `lib/`, run, reverted
+
+Both mutations were applied to `lib/agent/agent_runtime.dart`, the full suite
+was run for each, and both were reverted. `git diff lib/` is empty.
+
+**Mutation 1 — raise the negative rung above the threshold.**
+`kConfidencePlatformErrorCode = 0.30` → `0.80`.
+
+```
+01:39 +1032 -9: Some tests failed.
+
+Failing tests:
+  test/agent_runtime_critic_signal_test.dart: the threshold keeps its meaning
+    every negative signal is under 0.5 and every positive one is over it
+  test/agent_runtime_truth_test.dart: ReflectionEvent is real
+    a degraded run is marked as such and keeps the event after recovery
+  test/agent_runtime_truth_test.dart: the recovery branch is reachable from a real outcome
+    a dispatch the platform failed is routed to recovery
+  test/agent_runtime_truth_test.dart: the recovery path carries the executor's reason out
+    a platform failure is reported under the code the platform wrote
+  test/integration/recovery_audit_surface_test.dart: a real failed run reaches the
+    Safety Center's event source the A4 audit entry is published on the graph's own safety log
+  test/integration/recovery_audit_surface_test.dart: a real failed run reaches the
+    Safety Center's event source the run is over before the user is asked anything again
+  test/integration/recovery_audit_surface_test.dart: and the Safety Center renders
+    what the log holds a user who opens the Safety Center sees the recovery
+  test/composition_root_test.dart: a run the platform fails reaches recovery, through
+    the pipeline a dispatched gesture the platform failed is scored, recovered and logged
+  test/composition_root_test.dart: the undo window is a real control, not a picture of one
+    a compensation the platform failed reports the platform's own code
+```
+
+**9 failures** (`+1032 -9`). All three of the new file's recovery assertions
+failed, with the real mismatch:
+
+```
+  Expected: a value less than <0.5>
+    Actual: <0.8>
+     Which: is not a value less than <0.5>
+  test/integration/recovery_audit_surface_test.dart 156:9  main.<fn>.<fn>
+  Bad state: No element
+  dart:async                                                Stream.firstWhere
+```
+
+and, in the widget test,
+`Found 0 widgets with text "RECOVERY_BLOCKED": []`.
+
+**Mutation 2 — drop the routing branch itself.**
+`if (reflection.confidence < 0.5)` → `if (reflection.confidence < 0.5 && false)`.
+
+```
+01:39 +1031 -10: Some tests failed.
+
+Failing tests:
+  test/agent_runtime_truth_test.dart: the recovery branch is reachable from a real outcome
+    a dispatch the platform failed is routed to recovery
+  test/agent_runtime_truth_test.dart: the recovery branch is reachable from a real outcome
+    a refusal with no code is routed to recovery as well
+  test/agent_runtime_truth_test.dart: the recovery path carries the executor's reason out
+    a platform failure is reported under the code the platform wrote
+  test/agent_runtime_truth_test.dart: the recovery path carries the executor's reason out
+    a gate refusal is reported under the gate's own message
+  test/agent_runtime_truth_test.dart: the recovery path carries the executor's reason out
+    an answer nothing can read carries no reason at all
+  test/integration/recovery_audit_surface_test.dart: a real failed run reaches the
+    Safety Center's event source the A4 audit entry is published on the graph's own safety log
+  test/integration/recovery_audit_surface_test.dart: a real failed run reaches the
+    Safety Center's event source the run is over before the user is asked anything again
+  test/integration/recovery_audit_surface_test.dart: and the Safety Center renders
+    what the log holds a user who opens the Safety Center sees the recovery
+  test/composition_root_test.dart: a run the platform fails reaches recovery, through
+    the pipeline a dispatched gesture the platform failed is scored, recovered and logged
+  test/composition_root_test.dart: the undo window is a real control, not a picture of one
+    a compensation the platform failed reports the platform's own code
+```
+
+**10 failures** (`+1031 -10`). Again all three of the new file's recovery
+assertions failed:
+
+```
+  Expected: true
+    Actual: <false>
+  test/integration/recovery_audit_surface_test.dart 163:9  main.<fn>.<fn>
+  Bad state: No element
+  dart:async                                                Stream.firstWhere
+```
+
+### Gates, on this branch, before the commit
+
+```
+$ flutter analyze
+Analyzing noir-wt-recovery-e2e...
+No issues found! (ran in 2.7s)
+
+$ flutter test
+01:35 +1040: .../test/providers_test.dart: resolveWithFallback walks the chain in
+  order, then fails loudly
+01:35 +1041: All tests passed!
+exit 0
+
+$ dart format --set-exit-if-changed lib test
+Formatted 146 files (0 changed) in 0.74 seconds.
+exit 0
+```
+
+**Test count before: 1040. After: 1041.** The integration file went from 4 tests
+to 5 (one driven end-to-end test, one "the run dispatches exactly once", the
+widget test kept, and the two empty-log tests kept), so net +1. The baseline was
+measured, not assumed: `flutter test --reporter expanded` on the untouched tree
+at `373fc58` ended `01:42 +1040: All tests passed!`.
+
+### Found, not fixed
+
+- **A gate refusal still never reaches recovery, and now cannot.** PROBE C shows
+  a `PolicyEngine` refusal and a `ConsentGate` refusal are both blocked before
+  `execute.run`, so the critic never scores them and no audit record exists for
+  them. That is defensible — a run that was refused has not learned anything
+  about the screen, and the refusal is already on the safety log as a policy
+  event — but it means the recovery branch covers *execution* failures only. Not
+  changed here: it is a design question about A4's scope, not a defect, and
+  changing it would alter the gate's meaning rather than close a gap.
+- **`kConfidenceNotExecuted` (0.20) is reachable but unexercised by this file.**
+  The executor-level refusals reach the critic and do route to recovery (PROBE
+  B), but no integration test drives one; they are covered at unit level in
+  `test/agent_runtime_truth_test.dart`. Adding a second integration case for it
+  would be near-duplicate work and was left out deliberately.
+- **Still no device or emulator run.** Java and the Android SDK are absent on
+  this host, so every claim here is about the Dart composition root against a
+  stubbed `MethodChannel`, not about the Kotlin half. The `PlatformException`
+  the stub throws is the shape the Kotlin service produces when the system
+  cancels a gesture, but that correspondence is asserted from the source, not
+  observed on hardware.
+- **`test/composition_root_test.dart` still holds its own copy of this
+  end-to-end proof** (the group "a run the platform fails reaches recovery,
+  through the pipeline"). It is not a duplicate of the new test — that file
+  asserts the recovery *branch* and the `failureReason` contract with a bridge
+  injected directly, this one asserts the *Safety Center surface* through
+  `CommandCentreScreen` — but the two now overlap on the audit row. Not
+  deduplicated: the two files answer different questions and removing either
+  coverage would lose an assertion.
+
+**Commit.** This section, the integration test and the harness change are one
+commit on `feature/recovery-e2e`. Its SHA is reported in the run log rather than
+written here, because a commit cannot contain its own SHA; the tree it carries is
+the one the three gates above were run on. Not pushed, not merged.
+
+**Model policy.** `opencode/space-bunny-free` only; no other model was used for
+any part of this work.

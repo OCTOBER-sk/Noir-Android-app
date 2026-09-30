@@ -32,9 +32,10 @@ void main() {
   List<NoirUiEvent> productionToolRunOrder({required bool success}) =>
       <NoirUiEvent>[
         ActionCompletedWithUndoWindow(
-          'action undo-1',
+          'navigate "maps"',
           true,
           const Duration(seconds: 5),
+          'undo-1',
         ),
         ToolCallStarted('gesture', 1),
         ToolCallCompleted('gesture', success),
@@ -108,9 +109,10 @@ void main() {
         tester,
         events,
         ActionCompletedWithUndoWindow(
-          'action undo-1',
+          'navigate "maps"',
           true,
           const Duration(seconds: 5),
+          'undo-1',
         ),
       );
       await deliver(tester, events, ToolCallStarted('gesture', 1));

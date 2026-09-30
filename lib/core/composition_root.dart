@@ -1422,6 +1422,82 @@ class NoirComposition extends ChangeNotifier {
     }
   }
 
+  /// Compensates the action an undo window is still offering.
+  ///
+  /// This is the D15 control's whole implementation, and it is the *only* way
+  /// out of an undo window. Four things are decided here, and none of them is
+  /// decided by the UI:
+  ///
+  ///   * Which action. The press names a window id, and it is answered against
+  ///     the live window alone. A window that has elapsed, or one that has
+  ///     already been compensated, is refused, so the compensating run below
+  ///     can start at most once per action.
+  ///   * Whether there is anything to reverse. An action whose verb has no
+  ///     inverse this build can dispatch is refused, which is the same fact the
+  ///     window published as `reversible: false` and the reason the control is
+  ///     not drawn for it.
+  ///   * Whether it may happen. The compensation is run through [runAutomation],
+  ///     so it is planned against the live screen, scored by the same
+  ///     [RiskClassifier], vetted by the same [PolicyEngine] and confirmed by a
+  ///     human through the same [ConsentGate] as any tap. The undo does not
+  ///     reuse the original approval — that one was single-use and covered one
+  ///     dispatch — and it never reaches a gesture without a new one.
+  ///   * What to tell the user. The result is whatever the platform confirmed,
+  ///     and the reason when it confirmed nothing. There is no path here that
+  ///     returns a success the executor did not report.
+  Future<UndoResult> undo(String actionId) async {
+    if (_disposed) return const UndoRefused(kUndoNoLiveWindow);
+    final LiveUndoWindow? live = undoWindow.live;
+    if (live == null || live.actionId != actionId) {
+      return const UndoRefused(kUndoNoLiveWindow);
+    }
+    final Compensation? compensation = live.action.compensation;
+    if (compensation == null) {
+      return const UndoRefused(kUndoNotCompensatable);
+    }
+    // The user's decision ends the window whatever the compensation goes on to
+    // do. That is what makes it single-use: the next press finds no live window
+    // to answer, so an action can be compensated exactly once.
+    undoWindow.cancel();
+    _logSafety(
+      summary: 'Undo requested for ${live.action.description}',
+      kind: SafetyEventKind.policy,
+      outcome: SafetyEventOutcome.unknown,
+    );
+    final RuntimeResult? result = await runAutomation(
+      AutomationRequest(
+        action: compensation.action,
+        input: compensation.input,
+        targetNodeIndex: compensation.targetNodeIndex,
+      ),
+    );
+    return _undoResult(actionId, result);
+  }
+
+  /// What a compensating run really amounted to.
+  ///
+  /// A null result is the run never reaching an outcome at all — the screen
+  /// could not be read, or the pipeline threw — and is reported as such rather
+  /// than as a success. A blocked run is reported with the reason the gate gave.
+  UndoResult _undoResult(String actionId, RuntimeResult? result) {
+    if (result == null) return const UndoRefused(kUndoCouldNotRun);
+    final Object? outcome = result.result;
+    if (result.blocked) {
+      if (outcome is GateResult && outcome.allowed) {
+        // The policy allowed the compensation and nobody answered the gate: the
+        // gate's own bound produced this, and silence is a refusal.
+        return const UndoRefused(kUndoNotApproved);
+      }
+      return UndoRefused(
+        outcome is GateResult ? outcome.message : kUndoCouldNotRun,
+      );
+    }
+    if (executionConfirmed(outcome)) return UndoPerformed(actionId);
+    return UndoRefused(
+      outcome is NativeGestureOutcome ? outcome.blockReason : kUndoUnconfirmed,
+    );
+  }
+
   /// Whether the A6a sanitizer stripped anything out of the last real dump.
   ///
   /// Read from the platform, never assumed: a dump that could not be read is

@@ -72,8 +72,24 @@ class AgentRuntimePipeline {
       }
     }
 
-    await undoWindow.open(5, allowed: risk.level >= 1);
+    // A6b. The window is opened on the action that *ran*, so it comes after
+    // `execute` and not before it: the compensation a press dispatches has to
+    // aim at the screen the action produced, and the toast has to describe a
+    // completion that happened rather than one about to. It is offered for
+    // riskLevel >= 1, and the window itself decides whether the action is
+    // something that can be compensated at all.
     final executed = await execute.run(plan);
+    await undoWindow.open(
+      5,
+      action: UndoableAction(
+        plan: plan,
+        riskLevel: risk.level,
+        executor: execute,
+        outcome: executed,
+        compensation: compensationFor(plan.content),
+      ),
+      allowed: risk.level >= 1,
+    );
     final reflection = await reflectionCritic.analyze(
       plan,
       executed,
@@ -107,8 +123,19 @@ abstract class Gate {
   Future<bool> check(GateResult policy, RiskLevel risk);
 }
 
+/// The A6b stage, and what it is handed: the action that ran, and everything an
+/// undo of it needs.
+///
+/// [action] is required rather than optional because a window with nothing to
+/// reverse is what made the D15 control inert — the window used to carry an id
+/// and a `cancelled` flag, so a press had no plan to read and no executor to
+/// reach.
 abstract class UndoWindowOpener {
-  Future<UndoState> open(int seconds, {bool allowed = true});
+  Future<UndoState> open(
+    int seconds, {
+    required UndoableAction action,
+    bool allowed = true,
+  });
 }
 
 abstract class Executor {
@@ -205,6 +232,196 @@ class Reflection {
   Reflection({required this.confidence});
 }
 
+/// What an undo attempt actually did.
+///
+/// Sealed because the D15 control is only honest if the two answers cannot be
+/// confused: the UI prints "Undone." for [UndoPerformed] and has no way to
+/// reach that string for a refusal, which is the whole difference between a
+/// live control and a control that claims a success nobody had.
+sealed class UndoResult {
+  const UndoResult();
+}
+
+/// The compensating run dispatched a gesture and the platform confirmed it.
+final class UndoPerformed extends UndoResult {
+  const UndoPerformed(this.actionId);
+
+  /// The action that was compensated, as the window named it.
+  final String actionId;
+
+  @override
+  String toString() => 'UndoPerformed($actionId)';
+}
+
+/// Nothing was compensated, and this is the reason that is shown.
+final class UndoRefused extends UndoResult {
+  const UndoRefused(this.reason);
+
+  /// Wire-stable: either a code from this file, the executor's own block code,
+  /// or the PolicyEngine's message.
+  final String reason;
+
+  @override
+  String toString() => 'UndoRefused($reason)';
+}
+
+/// The window a press named is not open: it already elapsed, it was already
+/// used, or the graph was never offering one.
+const String kUndoNoLiveWindow = 'NO_LIVE_UNDO_WINDOW';
+
+/// The action has no inverse this build can dispatch, so there is nothing an
+/// undo could do. The control is not offered for such an action.
+const String kUndoNotCompensatable = 'NOT_COMPENSATABLE';
+
+/// The policy allowed the compensation and the human did not answer it. The
+/// gate's own bound produced this, and silence is a refusal.
+const String kUndoNotApproved = 'UNDO_NOT_APPROVED';
+
+/// The compensating run could not be performed at all: the screen could not be
+/// read, or the pipeline failed before it dispatched anything.
+const String kUndoCouldNotRun = 'UNDO_COULD_NOT_RUN';
+
+/// The run finished without the platform confirming that anything happened.
+const String kUndoUnconfirmed = 'UNDO_UNCONFIRMED';
+
+/// An [Executor] answer that can say whether the action really reached the
+/// screen.
+///
+/// The A6 [Executor] is an interface, and only the app's real implementation
+/// can answer this: `NativeGestureExecutor` returns the platform's own
+/// `executed` receipt. Nothing else in the app may claim an action happened.
+abstract class ExecutionReport {
+  /// Whether a gesture really reached the accessibility service.
+  bool get executed;
+}
+
+/// Whether [outcome] is the executor confirming that the action happened.
+///
+/// An answer that is not a report is not treated as success. The undo window is
+/// built on this, and a window over an action nobody confirmed would announce a
+/// completion that did not happen and offer a control with nothing behind it.
+bool executionConfirmed(Object? outcome) =>
+    outcome is ExecutionReport ? outcome.executed : false;
+
+/// The inverse action an undo dispatches, as data and nothing else.
+///
+/// It names a verb and the text of the control to aim at; it does not name a
+/// screen, a node or a gesture. The compensating run re-plans it against the
+/// live dump through the same planner a manual run uses, so a control that is
+/// not on the screen is a real refusal from the executor rather than a guess
+/// this class has already committed to.
+class Compensation {
+  const Compensation({
+    required this.action,
+    required this.input,
+    this.targetNodeIndex,
+  });
+
+  /// The verb the compensating run is scored and gated under.
+  final String action;
+
+  /// The text the executor looks for in the live dump, exactly as a manual
+  /// request's own input is looked for.
+  final String input;
+
+  /// A node index, when the inverse aims at a known position rather than at
+  /// text. Null for every inverse in [kActionCompensations].
+  final int? targetNodeIndex;
+
+  @override
+  String toString() => 'Compensation($action on "$input")';
+}
+
+/// The inverses this build can dispatch, keyed by the verb they undo.
+///
+/// This is a capability list, not a heuristic, and it is deliberately short. An
+/// entry means the app can name the reverse gesture and send it through the same
+/// gated executor the original action used, so an undo is a second gated run
+/// rather than a shortcut. An action with no entry has no undo: it is
+/// irreversible by construction, the D15 control is not drawn for it, and
+/// nothing about it is faked — the app cannot un-tap a button, un-send a
+/// message or un-delete a note, so those verbs are absent rather than mapped to
+/// something that would merely look like a reversal.
+const Map<String, Compensation> kActionCompensations = <String, Compensation>{
+  'navigate': Compensation(action: 'navigate_back', input: 'back'),
+};
+
+/// The inverse available for [content], or null when it has none.
+///
+/// A proposal that is not a map, or that names no verb, has no inverse: this
+/// decides whether a control is offered, so a guess here would be a control that
+/// cannot do what it says.
+Compensation? compensationFor(dynamic content) {
+  if (content is! Map) return null;
+  final String verb = content['action']?.toString().trim().toLowerCase() ?? '';
+  if (verb.isEmpty) return null;
+  return kActionCompensations[verb];
+}
+
+/// One action that ran, and everything an undo of it needs.
+///
+/// This is the record the A6b window holds. Before it existed the window
+/// carried an id and a flag, so the D15 button had no plan to describe, no
+/// executor to reach and no inverse to run, which is why it could only ever be
+/// drawn disabled.
+class UndoableAction {
+  UndoableAction({
+    required this.plan,
+    required this.riskLevel,
+    required this.executor,
+    required this.outcome,
+    required this.compensation,
+  }) : description = _describe(plan);
+
+  /// The plan that ran, verbatim: the proposal the gate scored and the executor
+  /// dispatched.
+  final Plan plan;
+
+  /// The A6 numeric risk level this action was classified at.
+  final int riskLevel;
+
+  /// The executor that ran it, kept so the record says who did the work rather
+  /// than only that something did.
+  final Executor executor;
+
+  /// What the executor answered. Read through [executionConfirmed], never
+  /// assumed.
+  final Object? outcome;
+
+  /// The inverse for this action's verb, or null when the app cannot name one.
+  final Compensation? compensation;
+
+  /// What the user is told happened, built from the real proposal.
+  ///
+  /// Never the window's own handle: "action undo-1" is a wire id, not a
+  /// description of anything a user did.
+  final String description;
+
+  /// Whether the platform confirmed the action reached the screen.
+  bool get completed => executionConfirmed(outcome);
+
+  /// Whether an undo of this action can be dispatched at all.
+  ///
+  /// This is what the window publishes as `reversible`, and it is a property of
+  /// the action rather than of how its window happened to end.
+  bool get isCompensatable => compensation != null;
+
+  /// The proposal, in the words the user chose, with the verb that acted on it.
+  static String _describe(Plan plan) {
+    final Object? content = plan.content;
+    if (content is! Map) return 'an action';
+    final String verb = content['action']?.toString().trim() ?? '';
+    final String target = content['input']?.toString().trim() ?? '';
+    if (verb.isEmpty) return 'an action';
+    return target.isEmpty ? verb : '$verb "$target"';
+  }
+
+  @override
+  String toString() =>
+      'UndoableAction($description, risk $riskLevel, '
+      'compensatable: $isCompensatable)';
+}
+
 // A6b — UndoWindow: the cancellable countdown offered on any action with
 // risk >= 1 (V2.2 addendum R1). The duration in force is the `seconds` value
 // the caller passed to [UndoWindowOpener.open], and the window ends when that
@@ -248,8 +465,10 @@ class UndoWindow {
 // A6 — Pipeline.execute now integrates PolicyEngine.gate + UndoWindow.
 // The countdown itself is not a placeholder: CountdownUndoWindow in
 // lib/core/agent_wiring.dart opens a real UndoWindow for the duration the
-// caller passes and ends it when that duration has elapsed or the user
-// cancels, and the composition root wires that implementation into the app.
+// caller passes, announces it while the countdown is still running, and ends it
+// when that duration has elapsed or the user cancels. It is handed the
+// [UndoableAction] the run produced, and the composition root wires both the
+// implementation and the press handler into the app.
 
 // A12 (V2.2 R1) — what reflection actually decided for one run.
 //

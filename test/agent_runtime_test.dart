@@ -41,7 +41,11 @@ class _Gate extends Gate {
 
 class _UndoWindowOpener extends UndoWindowOpener {
   @override
-  Future<UndoState> open(int seconds, {bool allowed = true}) async {
+  Future<UndoState> open(
+    int seconds, {
+    required UndoableAction action,
+    bool allowed = true,
+  }) async {
     return UndoState();
   }
 }

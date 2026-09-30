@@ -234,6 +234,11 @@ class _SplashScreenState extends State<SplashScreen> {
       // consent was to leave this screen and find the Operations sheet.
       confirmations: composition.confirmations,
       onAnswerConfirmation: answerConfirmation,
+      // The D15 Undo control's executor, and the same rule as the answer above:
+      // the toast may only be live when something real is behind it. This is the
+      // graph's own `undo`, so a press ends the live window and runs the
+      // compensation through the same gate and the same confirmation a tap needs.
+      onUndoAction: composition.undo,
       operations: OperationsSheet(
         bridge: composition.bridge,
         taskTimeline: composition.taskTimeline(),

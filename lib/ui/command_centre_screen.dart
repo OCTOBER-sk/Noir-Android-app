@@ -9,6 +9,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../agent/agent_runtime.dart'
+    show UndoPerformed, UndoRefused, UndoResult;
 import '../core/agent_wiring.dart';
 import '../core/conversation_controller.dart';
 import '../core/mcp_composition.dart';
@@ -75,6 +77,7 @@ class CommandCentreScreen extends StatefulWidget {
     this.events,
     this.confirmations,
     this.onAnswerConfirmation,
+    this.onUndoAction,
     this.onOpenSettings,
   });
 
@@ -146,6 +149,21 @@ class CommandCentreScreen extends StatefulWidget {
   /// request is answered instead.
   final void Function(PendingConfirmation confirmation, bool approved)?
   onAnswerConfirmation;
+
+  /// Compensates the action an undo window is offering, and reports what
+  /// really happened.
+  ///
+  /// This is the same injection style as [onAnswerConfirmation] and for the
+  /// same reason: the D15 control is allowed to be live only when a real
+  /// executor is behind it, and only the object graph has one. `main.dart`
+  /// installs `NoirComposition.undo`, which looks the live window up, ends it and
+  /// runs the compensation as a second gated automation — so the press cannot
+  /// reach a gesture without the policy gate and a human confirmation saying so.
+  ///
+  /// Null means nothing is connected, and the toast then renders its control
+  /// disabled and says so. A local substitute is never installed: an undo with
+  /// no executor behind it is a success nobody performed.
+  final Future<UndoResult> Function(String actionId)? onUndoAction;
 
   /// Opens the screen where a provider, its base URL and its API key are
   /// configured. Null renders no settings control, rather than a button that
@@ -661,6 +679,9 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
         onAnswer: widget.onAnswerConfirmation == null
             ? null
             : _answerConfirmation,
+        // Threaded, never defaulted: the toast's control is live exactly when
+        // the graph supplied an executor for it.
+        onUndo: widget.onUndoAction,
       );
     }
     if (item is _SystemNoteItem) {
@@ -1255,6 +1276,7 @@ class _MessageRow extends StatelessWidget {
     required this.event,
     required this.confirmation,
     required this.onAnswer,
+    required this.onUndo,
   });
 
   final NoirUiEvent event;
@@ -1265,6 +1287,10 @@ class _MessageRow extends StatelessWidget {
 
   /// Null means no consent path is connected to this screen.
   final void Function(bool approved)? onAnswer;
+
+  /// The undo executor, handed to the toast so its control is live only when
+  /// there is something behind it. Null means no executor is connected.
+  final Future<UndoResult> Function(String actionId)? onUndo;
 
   @override
   Widget build(BuildContext context) {
@@ -1284,7 +1310,7 @@ class _MessageRow extends StatelessWidget {
           onAnswer: onAnswer,
         );
       case ActionCompletedWithUndoWindow():
-        return UndoToast(event: event);
+        return UndoToast(event: event, onUndo: onUndo);
       case CostEstimateResolved():
         return _UsageRow(event: event);
       default:
@@ -1683,18 +1709,87 @@ class _CardActionButton extends StatelessWidget {
 }
 
 /// Undo toast — real event-backed, 5-second countdown, monochrome + rainbow tip.
-class UndoToast extends StatelessWidget {
-  const UndoToast({
-    super.key,
-    required this.event,
-    this.window = const Duration(seconds: 5),
-  });
+///
+/// The control is live or it is honest about not being live. It used to be
+/// neither: it drew a permanently disabled box captioned "Undo" and printed
+/// "Disabled: undo is not wired to an action executor yet." underneath, while
+/// the runtime could cancel a window and no press could reach the executor that
+/// ran the action.
+///
+/// So [onUndo] is the executor itself, injected the same way
+/// [CommandCentreScreen.onUndoAction] is: production hands over the graph's own
+/// `NoirComposition.undo`, a test hands over whatever it wants to observe, and a
+/// screen with neither renders the control disabled and says why. What it can
+/// never do is replace a missing handler with a local one — an undo with no
+/// executor behind it is a success nobody performed.
+class UndoToast extends StatefulWidget {
+  const UndoToast({super.key, required this.event, this.onUndo});
 
+  /// The window the graph announced. [ActionCompletedWithUndoWindow.reversible]
+  /// says whether this action can be reversed at all, and
+  /// [ActionCompletedWithUndoWindow.actionId] is the handle the press hands
+  /// back to the graph.
   final ActionCompletedWithUndoWindow event;
-  final Duration window;
+
+  /// Performs the real compensation and reports what really happened. Null
+  /// means no executor is connected to this toast.
+  final Future<UndoResult> Function(String actionId)? onUndo;
+
+  /// The key of the Undo control, so a test can ask whether it is live rather
+  /// than infer it from a paint.
+  static const Key controlKey = Key('undo-toast-control');
+
+  @override
+  State<UndoToast> createState() => _UndoToastState();
+}
+
+class _UndoToastState extends State<UndoToast> {
+  /// What a press has already produced. Held here rather than in the graph
+  /// because it is a statement about *this* control: one action, one press, one
+  /// outcome to report.
+  UndoResult? _result;
+  bool _working = false;
+
+  Future<void> _undo() async {
+    final Future<UndoResult> Function(String actionId)? onUndo = widget.onUndo;
+    if (onUndo == null || _working || _result != null) return;
+    setState(() => _working = true);
+    final UndoResult result = await onUndo(widget.event.actionId);
+    if (!mounted) return;
+    setState(() {
+      _working = false;
+      _result = result;
+    });
+  }
+
+  /// Whether a press can reach anything right now.
+  ///
+  /// False with no handler, false while one is already running, and false once
+  /// one has reported: the compensating run is single-use, and a control that
+  /// stays live after it would invite a second undo of an action that has
+  /// already been reversed.
+  bool get _canUndo =>
+      widget.onUndo != null && !_working && _result == null;
+
+  /// What this toast can say, and every branch of it is true in both the wired
+  /// and the unwired build.
+  String? get _note {
+    if (!widget.event.reversible) return null;
+    if (widget.onUndo == null) {
+      return 'No undo executor is connected to this toast, so this control '
+          'cannot act.';
+    }
+    if (_working) return 'Running the undo. The gate asks for confirmation.';
+    final UndoResult? result = _result;
+    if (result is UndoPerformed) return 'Undone.';
+    if (result is UndoRefused) return 'Undo did not run: ${result.reason}.';
+    return 'The undo is a gated action: it is dispatched only once a human '
+        'confirms it.';
+  }
 
   @override
   Widget build(BuildContext context) {
+    final String? note = _note;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
       padding: const EdgeInsets.all(16),
@@ -1710,7 +1805,7 @@ class UndoToast extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${event.actionDescription} just happened.',
+                  '${widget.event.actionDescription} just happened.',
                   style: const TextStyle(
                     color: Color(0xFFFFFFFF),
                     fontSize: 14,
@@ -1719,23 +1814,26 @@ class UndoToast extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                if (event.reversible)
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _UndoActionButton(),
-                      SizedBox(height: 6),
-                      Text(
-                        'Disabled: undo is not wired to an action executor yet.',
-                        style: TextStyle(
-                          color: Color(0xFF5A5A5A),
-                          fontSize: 11,
-                          fontStyle: FontStyle.italic,
-                        ),
+                if (widget.event.reversible) ...[
+                  _CardActionButton(
+                    buttonKey: UndoToast.controlKey,
+                    label: 'Undo',
+                    filled: false,
+                    enabled: _canUndo,
+                    onTap: _canUndo ? _undo : null,
+                  ),
+                  if (note != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      note,
+                      style: const TextStyle(
+                        color: Color(0xFF5A5A5A),
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
                       ),
-                    ],
-                  )
-                else
+                    ),
+                  ],
+                ] else
                   const Text(
                     'Irreversible action completed.',
                     style: TextStyle(
@@ -1748,42 +1846,8 @@ class UndoToast extends StatelessWidget {
             ),
           ),
           // Animated rainbow-shifting countdown bar (tiny, smooth)
-          AnimatedRainbowCountdown(duration: window.inSeconds),
+          AnimatedRainbowCountdown(duration: widget.event.window.inSeconds),
         ],
-      ),
-    );
-  }
-}
-
-/// Undo control — rendered disabled until an action executor is wired.
-class _UndoActionButton extends StatelessWidget {
-  const _UndoActionButton();
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      enabled: false,
-      label: 'Undo',
-      child: const SizedBox(
-        width: 60,
-        height: 28,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            border: Border.fromBorderSide(BorderSide(color: Color(0xFF3A3A3A))),
-            borderRadius: BorderRadius.all(Radius.circular(8)),
-          ),
-          child: Center(
-            child: Text(
-              'Undo',
-              style: TextStyle(
-                color: Color(0xFF5A5A5A),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

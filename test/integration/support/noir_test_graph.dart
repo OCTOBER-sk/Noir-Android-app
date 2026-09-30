@@ -258,6 +258,91 @@ void removePlatformStub() {
       .setMockMethodCallHandler(_testChannel, null);
 }
 
+/// A screen a connected accessibility service really serves: one visible node
+/// the executor can resolve a gesture against, and one zero-alpha node that the
+/// A6a sanitizer strips.
+///
+/// Both halves are needed rather than one. Without the visible node the
+/// executor refuses before it dispatches, so the run never reaches the platform
+/// and proves nothing about a dispatch that failed; without the zero-alpha node
+/// the Safety Center's audit panel has no finding to report and the test would
+/// be asserting on an empty state.
+List<Map<String, dynamic>> failingDispatchDump() => <Map<String, dynamic>>[
+  <String, dynamic>{
+    'text': 'Send message',
+    'alpha': 1.0,
+    'zOrder': 0,
+    'visible': true,
+    'screenBounds': <String, dynamic>{
+      'left': 10,
+      'top': 100,
+      'right': 300,
+      'bottom': 180,
+    },
+  },
+  <String, dynamic>{
+    'text': 'concealed instruction',
+    'alpha': 0.0,
+    'zOrder': 0,
+    'visible': true,
+    'screenBounds': <String, dynamic>{
+      'left': 0,
+      'top': 0,
+      'right': 0,
+      'bottom': 0,
+    },
+  },
+];
+
+/// What a platform that fails every gesture it is asked to dispatch received.
+class FailingDispatchPlatform {
+  final List<MethodCall> calls = <MethodCall>[];
+
+  /// The methods the graph asked for, in order.
+  List<String> get methods =>
+      calls.map((MethodCall call) => call.method).toList();
+}
+
+/// Answers the platform channel like a connected service whose gestures all
+/// fail, and records what it was asked to do.
+///
+/// The failure is the shape `AccessibilityService.dispatchGesture` produces when
+/// the system cancels a gesture: a `PlatformException`, which
+/// `NativeBridge.dispatchGesture` turns into a not-executed outcome carrying
+/// the code. That is a real answer from the platform, not a stubbed verdict
+/// handed to the bridge, so the A12 critic scores it off the outcome's own
+/// `executed` and `platformCode` fields exactly as it would on a device.
+FailingDispatchPlatform installFailingDispatchPlatformStub() {
+  final FailingDispatchPlatform platform = FailingDispatchPlatform();
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(_testChannel, (MethodCall call) async {
+        platform.calls.add(call);
+        switch (call.method) {
+          case kMethodServiceStatus:
+            return <String, dynamic>{
+              kWireServiceConnected: true,
+              kWireCanPerformGestures: true,
+              kWireCanRetrieveWindowContent: true,
+              kWireHasNodeDump: true,
+              kWireLastNodeCount: failingDispatchDump().length,
+              kWireRuntimeSinkInstalled: true,
+              kWireGateSource: kGateSource,
+            };
+          case kMethodGetNodes:
+            return <String, dynamic>{
+              'nodes': failingDispatchDump(),
+              'nodeCount': failingDispatchDump().length,
+            };
+          case kMethodPolicyGate:
+            return <String, dynamic>{'allowed': true, 'message': 'ok'};
+          case kMethodDispatchGesture:
+            throw PlatformException(code: kCodeNativeDispatchFailed);
+        }
+        throw MissingPluginException(call.method);
+      });
+  return platform;
+}
+
 /// A graph under test, opened the way the app opens one.
 class NoirTestGraph {
   NoirTestGraph._({

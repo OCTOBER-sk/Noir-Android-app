@@ -1741,3 +1741,54 @@ the one the three gates above were run on. Not pushed, not merged.
 
 **Model policy.** `opencode/space-bunny-free` only; no other model was used for
 any part of this work.
+
+---
+
+## Heartbeat 2026-09-30 12:20
+
+The `feature/recovery-e2e` work this file's last section described as "not
+pushed, not merged" is now on `main` as `fe2d491`, merged by `70801a8`. That
+line is now stale by construction — the section is kept as the worker's own
+record, and this entry is the supervisor's.
+
+**Independently re-verified on `main` at `70801a8`** in a throwaway detached
+worktree (`/tmp/noir-verify-main`, removed afterwards), not on the branch:
+
+- `flutter pub get` — dependencies resolved, no version drift beyond the
+  pre-existing `vector_math 2.4.2` note.
+- `flutter analyze` — `No issues found!` (2.9s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1041**. Matches the
+  number the worker reported, measured on the merged tree rather than the branch.
+- `dart format --set-exit-if-changed lib test` — 146 files, 0 changed, exit 0.
+
+**CI** — run **36713571920** on `70801a8`, `success`, `Flutter verification`
+green in 3m44s. This is the first run that gates the recovery-e2e test change;
+the earlier heartbeat's "no run for this SHA" caveat does not apply here
+because this commit touches Dart files.
+
+**Scope of the merge.** `git diff --stat 373fc58 main` is three files:
+`test/integration/recovery_audit_surface_test.dart` (+311/-122 net),
+`test/integration/support/noir_test_graph.dart` (+85), and `SELF_REVIEW.md`
+(+280). **No file under `lib/` changed**, which is the claim the worker's own
+section made and which the merge stat independently confirms.
+
+**Integration state.** `git branch --no-merged main` prints nothing — all 29
+local branches are merged, so there is nothing left to integrate and no
+patch-id trap to check. `main` is clean and level with `origin/main` at
+`70801a8`.
+
+**No workers in flight.** `git worktree list` shows only the main checkout; the
+`/tmp/noir-wt-*.log` paths are logs, not worktrees. `ps` matched no `opencode`,
+`claude`, `codex`, `flutter`, `dart` or `gradle` process. This heartbeat
+dispatched no agent, so no model was selected and no spend occurred;
+`opencode/space-bunny-free` remains the only permitted route.
+
+**Standing gap, unchanged:** still no device or emulator run. Java and the
+Android SDK are absent on this host, so the `PlatformException` correspondence
+between the Dart stub and the Kotlin service is asserted from source, not
+observed on hardware. Every claim here is about the Dart composition root.
+
+**Next action:** nothing to do until new work is dispatched. The remaining
+known-design-question items recorded in the previous section (gate refusals
+never reaching recovery; the 0.20 rung unit-covered only; the overlapping audit
+row in `composition_root_test.dart`) are deliberate and were left as-is.

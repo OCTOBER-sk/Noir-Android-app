@@ -1430,3 +1430,34 @@ only, no paid or OpenRouter route — remains in force for the next dispatch.
 **Standing gap, unchanged:** no device or emulator run. Java and the Android SDK
 are absent on this host; CI's `assembleDebug` is the only APK evidence, and
 nothing here was observed on hardware.
+
+## Heartbeat 2026-09-30 11:41
+
+Re-verified from scratch rather than inheriting the 10:54 numbers:
+
+- **`flutter analyze`** — `No issues found!` (0.9s) on `38a1efa`.
+- **`flutter test`** — exit 0, `All tests passed!`, counter **1040**. Same count as
+  the previous heartbeat, so no test was added or lost in between.
+- **CI** — newest run **36684913887** on `d3175c1`, `success`. Still no run for
+  `38a1efa`, and the reason is unchanged: `git show --stat HEAD` is one file,
+  `SELF_REVIEW.md`, and the workflow's `paths-ignore: ['**/*.md']` skips a push
+  when every changed path matches. The claim is that the Dart code under that
+  green run is unchanged since, not that `38a1efa` was gated.
+
+**Integration state.** `git branch --no-merged main` prints nothing and
+`git rev-list --left-right --count origin/main...HEAD` prints `0 0`. `main` is
+clean at `38a1efa`, level with `origin/main`. Nothing to integrate.
+
+**No workers in flight.** `git worktree list` shows only the main checkout; the
+five `/tmp/noir-wt-*.log` paths are log files, not worktrees, and the pre-run
+script's "worktree missing" lines for provider/mcp/data/product/ui/android refer
+to those absent worktrees. `ps` matched no `opencode`, `claude`, `codex`,
+`flutter`, `dart` or `gradle` process. The newest `/tmp/noir-*.jsonl` agent log
+was written 2026-09-26, four days stale. This heartbeat started nothing and
+integrated nothing.
+
+**Model policy.** No agent dispatched, so no model selected and no spend.
+`opencode/space-bunny-free` only remains the rule for the next dispatch.
+
+**Standing gap, unchanged:** still no device or emulator run, and still no
+implementation work outstanding from the branches.

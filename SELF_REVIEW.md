@@ -1873,3 +1873,24 @@ hardware.
 design-question items carried forward (gate refusals never reaching recovery;
 the 0.20 rung unit-covered only; the overlapping audit row in
 `composition_root_test.dart`) remain open by choice.
+
+---
+
+## Heartbeat 2026-09-30 14:32
+
+**State.** `main` at `f45fbb0`, level with `origin/main` after `git fetch` (both `f45fbb0ce836b87564b5a97098bf85d4e7f75c15`), working tree clean, no stashes, `git branch --no-merged main` empty. `git worktree list` shows only the main checkout; the `/tmp/noir-wt-*` worktree paths do not exist and only stale `.log` artifacts remain there (newest mtime `2026-09-30 12:26`). `ps` matched no `opencode`, `claude`, `codex`, `flutter`, `dart` or `gradle` process. No worker in flight, nothing to integrate.
+
+**Re-verified on `main` at `f45fbb0`**, run by the supervisor in the main checkout (tree clean before and after):
+
+- `flutter analyze` — `No issues found!` (0.9s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1041**.
+
+`git diff --stat 08af109 HEAD` is `SELF_REVIEW.md` only, so the Dart surface measured above is identical to the previous heartbeat.
+
+**CI.** Latest run remains **36713571920** on `70801a8` (`success`, 3m54s). The doc-only commits since it have no CI run of their own.
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost incurred. `opencode/space-bunny-free` remains the only permitted route; no paid model and no OpenRouter fallback.
+
+**Standing gap, unchanged:** no device or emulator run; Java and the Android SDK are absent on this host, so the Dart/Kotlin `PlatformException` correspondence is asserted from source only.
+
+**Next action:** nothing until new work is dispatched. The carried-forward design questions (gate refusals never reaching recovery; the 0.20 rung unit-covered only; the overlapping audit row in `composition_root_test.dart`) remain open by choice.

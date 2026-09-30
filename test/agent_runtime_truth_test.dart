@@ -55,9 +55,31 @@ class _Recovery extends RecoveryEngine {
   ) async => RuntimeResult.success('recovered', reflection);
 }
 
+/// The recovery the pipeline is asked for, recorded rather than returned: a
+/// `_Recovery` that answers `success('recovered')` cannot tell a test whether the
+/// branch ran at all, and a recovery branch that is never taken is the exact
+/// defect this file's neighbours were written about.
+class _RecordingRecovery extends RecoveryEngine {
+  int calls = 0;
+  Reflection? reflection;
+  Object? executed;
+
+  @override
+  Future<RuntimeResult> executeReflectionRecovery(
+    Reflection reflection,
+    dynamic executed,
+  ) async {
+    calls += 1;
+    this.reflection = reflection;
+    this.executed = executed;
+    return RuntimeResult.blocked(GateResult.blocked('RECOVERY_NEEDS_REVIEW'));
+  }
+}
+
 AgentRuntimePipeline _pipeline({
   required dynamic executed,
   required PolicyEngine policyEngine,
+  RecoveryEngine? recovery,
 }) {
   return AgentRuntimePipeline(
     planner: _Planner(),
@@ -67,7 +89,7 @@ AgentRuntimePipeline _pipeline({
     undoWindow: _Opener(),
     execute: _Executor(executed),
     reflectionCritic: ReflectionCriticImpl(),
-    recovery: _Recovery(),
+    recovery: recovery ?? _Recovery(),
     sanitizer: (List<dynamic> nodes) async =>
         SanitizedResult(const <String>[], const []),
   );
@@ -79,6 +101,20 @@ AgentRuntimePipeline _pipeline({
 final NativeGestureOutcome _executed = const NativeGestureOutcome(
   executed: true,
   verdict: NativeGateVerdict(allowed: true, message: 'ok'),
+);
+
+/// What the platform answers when the gesture was dispatched and failed. The
+/// shape `NativeBridge.dispatchGesture` builds on a `PlatformException`: not
+/// executed, gate not granted, and a code naming the failure.
+final NativeGestureOutcome _dispatchFailed = NativeGestureOutcome.blocked(
+  const NativeGateVerdict.blocked(kCodeNativeDispatchFailed),
+  platformCode: kCodeNativeDispatchFailed,
+);
+
+/// What the platform answers when the gate refused before anything was
+/// dispatched. Not executed, and no code: the refusal is the whole report.
+final NativeGestureOutcome _refused = NativeGestureOutcome.blocked(
+  const NativeGateVerdict.blocked(kCodeConfirmationRequired),
 );
 
 /// The action record the window is opened with, built by hand from the pieces a
@@ -188,7 +224,7 @@ void main() {
   group('ReflectionEvent is real', () {
     test('a confident run carries a ReflectionEvent on its result', () async {
       final RuntimeResult result = await _pipeline(
-        executed: 'sent',
+        executed: _executed,
         policyEngine: PolicyEngine(),
       ).run(null);
 
@@ -204,7 +240,7 @@ void main() {
       'a degraded run is marked as such and keeps the event after recovery',
       () async {
         final RuntimeResult result = await _pipeline(
-          executed: 'action failed',
+          executed: _dispatchFailed,
           policyEngine: PolicyEngine(),
         ).run(null);
 
@@ -222,7 +258,7 @@ void main() {
       () async {
         final PolicyEngine locked = PolicyEngine()..uiLock = true;
         final RuntimeResult result = await _pipeline(
-          executed: 'sent',
+          executed: _executed,
           policyEngine: locked,
         ).run(null);
 
@@ -230,6 +266,61 @@ void main() {
         expect(result.reflectionEvent, isNull);
       },
     );
+  });
+
+  // The gap this file's neighbour was written about: the shipped critic decided
+  // confidence from `executed.toString()`, and the only real outcome
+  // (`NativeGestureOutcome`) renders as `Instance of 'NativeGestureOutcome'`, so
+  // `confidence < 0.5` was unreachable from a real run and the A4 recovery branch
+  // below could only be reached by driving the engine by hand. These two tests
+  // assert the branch is reached, and reached with the platform's own outcome.
+  group('the recovery branch is reachable from a real outcome', () {
+    test('a dispatch the platform failed is routed to recovery', () async {
+      final _RecordingRecovery recovery = _RecordingRecovery();
+
+      final RuntimeResult result = await _pipeline(
+        executed: _dispatchFailed,
+        policyEngine: PolicyEngine(),
+        recovery: recovery,
+      ).run(null);
+
+      expect(recovery.calls, 1);
+      expect(identical(recovery.executed, _dispatchFailed), isTrue);
+      expect(recovery.reflection!.confidence, lessThan(0.5));
+      // The engine's own answer, not the pipeline's: a recovery run still ends
+      // as the block code the engine chose.
+      expect(result.blocked, isTrue);
+      expect((result.result as GateResult).message, 'RECOVERY_NEEDS_REVIEW');
+      // And the event survives the recovery hop, so the caller still learns why.
+      expect(result.reflectionEvent!.confidenceScore, lessThan(0.5));
+      expect(result.reflectionEvent!.degradedToNeedsReview, isTrue);
+    });
+
+    test('a refusal with no code is routed to recovery as well', () async {
+      final _RecordingRecovery recovery = _RecordingRecovery();
+
+      await _pipeline(
+        executed: _refused,
+        policyEngine: PolicyEngine(),
+        recovery: recovery,
+      ).run(null);
+
+      expect(recovery.calls, 1);
+      expect(recovery.reflection!.confidence, lessThan(0.5));
+    });
+
+    test('a confirmed gesture is not routed to recovery', () async {
+      final _RecordingRecovery recovery = _RecordingRecovery();
+
+      final RuntimeResult result = await _pipeline(
+        executed: _executed,
+        policyEngine: PolicyEngine(),
+        recovery: recovery,
+      ).run(null);
+
+      expect(recovery.calls, 0);
+      expect(result.blocked, isFalse);
+    });
   });
 
   group('UndoWindow counts down for real', () {

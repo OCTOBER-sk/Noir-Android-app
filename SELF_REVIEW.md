@@ -1059,3 +1059,118 @@ run. This is verified by tests against the real composition root, the real
 `PolicyEngine` and the real `SafetyCenterScreen` with a mocked platform channel —
 never by a person opening the screen on hardware. No claim is made here that one
 exists.
+
+---
+
+## 2026-09-30 ~06:20 UTC — NOT idle: the recovery branch is reachable from a real run
+
+**The gap, found by reading the code rather than the logs.**
+This is the gap the last entry left open, and it was left open honestly:
+`ReflectionCritic.computeConfidence` (`lib/agent/agent_runtime.dart:156` before
+this branch) scored an execution with `executed.toString().contains('failed')` or
+`.contains('error')`. The only real answer on the automation path is
+`NativeGestureOutcome` (`lib/platform/native_bridge.dart:179`), which implements
+`ExecutionReport` and carries a structured `bool executed`, a `NativeGateVerdict`
+and a `receipt` — and does not override `toString`. So it rendered as
+`Instance of 'NativeGestureOutcome'`, the check could not fire, and every real
+run scored 0.92. `reflection.confidence < 0.5` was unreachable, so
+`executeReflectionRecovery` never ran through the pipeline and the A4 audit trail
+added in 73ac4e3/22ed024 only ever grew inside a test that called the engine by
+hand.
+
+Two smaller lies were sitting in the same function, found the same way:
+
+1. **The `0.6` branch was dead.** It sniffed
+   `sanitizedContent.contains('REASON_')`, and `analyze` was handed
+   `sanitized.cleanTextNodes.join('\n')` — the *clean* nodes, which by
+   construction cannot contain a `Reason` name. Nothing could ever produce it.
+2. **The comment above it claimed a plan-vs-observed comparison.** "compares
+   intended outcome (plan) vs observed screen state". `Plan` was never read by
+   the function. A repo-wide `grep` for a second screen read inside the pipeline
+   finds none: the platform receipt echoes `x`/`y` from the bounds the executor
+   itself resolved and sent (`MainActivity.kt` `handleDispatchGesture`), so
+   reading it back would be the executor checking its own arithmetic. The
+   comparison the comment promised cannot be built out of anything this build
+   collects.
+
+**Delivered:**
+
+- `ExecutionSignal` (`lib/agent/agent_runtime.dart`) is a capability interface
+  beside `ExecutionReport`, carrying `bool? gateGranted` and `String?
+  platformCode`. It is declared on the `lib/agent/` side because that half must
+  not import `lib/platform/`, which already imports it. `NativeGestureOutcome`
+  implements it; `gateGranted` is a one-line projection of `verdict.allowed`.
+  The `Executor`/`RecoveryEngine` boundary stays `dynamic` — the critic narrows
+  on the interface instead of widening the signature.
+- The critic reads the report's own fields through the existing
+  `executionConfirmed` fail-closed rule, and the score comes off a named ladder
+  rather than inline literals: no observation `0.10`, not executed `0.20`, not
+  executed with a platform code `0.30`, executed over a dump the sanitizer
+  stripped something off `0.60`, executed clean `0.92`. Every negative sits under
+  the `0.5` the pipeline routes on, asserted as an invariant rather than assumed.
+- `analyze` now takes the `SanitizedResult` instead of a joined string, so the
+  `0.6` rung reads `stripped.isNotEmpty` and is live: on the real dump this test
+  suite uses, a zero-alpha node is stripped and a confirmed run scores 0.60
+  instead of 0.92.
+- The plan-vs-observed comment is corrected, and says why no such comparison is
+  performed rather than just deleting the claim. `Plan` is still taken, because
+  the pipeline hands every stage the plan it ran; a test asserts the plan cannot
+  move the score, so the absence is pinned rather than trusted.
+- Display path untouched: no gate, no task transition, no widget, no Safety
+  Center change. The four existing recovery-surface tests are unmodified and
+  still pass, and the header of that file — which said the branch was
+  unreachable and explained why it drove the engine directly — is corrected to
+  say the branch is reachable now and that driving it directly there is a
+  deliberate choice about what those tests isolate.
+
+**Evidence, all measured on this branch:**
+
+- `flutter analyze`: `No issues found!`
+- `flutter test`: `+1023: All tests passed!` (1005 before this branch, +18 new,
+  none removed)
+- `dart format --output=none --set-exit-if-changed lib test` — the gate CI runs:
+  `Formatted 145 files (0 changed)`, exit 0.
+- The new tests have teeth, checked by mutating `lib/` four times rather than
+  asserted:
+  - deleting the whole negative half of `computeConfidence` — **14 failures**,
+    including `a dispatched gesture the platform failed is scored, recovered and
+    logged` and every rung test in the new file;
+  - collapsing the platform-code rung into the code-less one — **5 failures**;
+  - deleting the sanitized-screen rung — **2 failures** (the first run of this
+    one produced only 1, so the test asserting `concealed < clean` was added);
+  - deleting the `is! ExecutionReport` guard so an unreadable answer falls
+    through as a success — **2 failures**.
+
+**One honest limit, recorded because it is not this branch's to fix.**
+One pre-existing test changed meaning, and it is worth saying plainly rather
+than burying: `a compensation with nothing to aim at reports the real reason`
+(`test/composition_root_test.dart`) asserted `(await run)!.blocked, isFalse` and
+an undo refusal of `MALFORMED_GESTURE_TARGET`. Both assertions encoded the defect
+this branch removes — a compensating run where the executor reported
+`executed: false` was being counted as a *successful* run at 0.92 confidence. The
+test now expects `RECOVERY_NEEDS_REVIEW` and says why in place. What that costs
+is real: the undo now reports the recovery engine's block code instead of the
+executor's narrower `MALFORMED_GESTURE_TARGET`, because
+`SanitizingRecoveryEngine` returns its own `GateResult` and does not carry the
+outcome out with it. Restoring the specific code means changing the recovery
+engine's return value or `_undoResult`, and both were out of scope here — the
+recovery engine's return feeds the Safety Center's safety log, which 22ed024
+owns. Not worked around, not hidden.
+
+**Also deliberately not changed:** `PolicyEngine`, `ConsentGate` and every other
+gate; `TaskController`/`NoirTaskRun` transitions (`recovering` → `failed` on
+recovery is unchanged); `SanitizingRecoveryEngine`'s return value, its audit row
+and the `onAudit` sink; `SafetyCenterScreen` and the row it renders;
+`NativeGestureExecutor`'s approval handling and bounds resolution; the
+`CountdownUndoWindow` ordering. Two test fixtures that stood in for an execution
+answer with a bare string (`_Executor` in `test/agent_runtime_test.dart`, and the
+`'sent'` / `'action failed'` values in `test/agent_runtime_truth_test.dart`) were
+replaced with the real `NativeGestureOutcome` the shipped executor returns — no
+assertion in either file was weakened or deleted, and the test count went up.
+
+**Standing gap, unchanged and not closable on this host:** no device or emulator
+run. Java and the Android SDK are both absent here, so nothing in this entry was
+observed on hardware. It is verified by tests against the real composition root,
+the real `PolicyEngine`, the real `ConsentGate`, the real `NativeGestureExecutor`
+and the real `NativeBridge` with a mocked platform channel — never by a person
+watching a gesture land. No claim is made here that one exists.

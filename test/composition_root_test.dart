@@ -48,6 +48,8 @@ import 'package:noir_android_app/providers/usage_tracker.dart' hide UsageRecord;
 import 'package:noir_android_app/safety/policy_engine.dart';
 import 'package:noir_android_app/safety/risk_classifier.dart';
 import 'package:noir_android_app/safety/screen_content_sanitizer.dart';
+import 'package:noir_android_app/ui/safety_center_screen.dart'
+    show SafetyEvent, SafetyEventAvailable, SafetyEventKind, SafetyEventState;
 import 'package:noir_android_app/ui/usage_dashboard_screen.dart';
 
 import 'support/fake_transport.dart';
@@ -785,6 +787,127 @@ void main() {
     );
   });
 
+  // A4 was wired to the Safety Center on 73ac4e3/22ed024, and the honest limit
+  // recorded there was that the branch could not be reached: the A12 critic
+  // scored an execution with `executed.toString().contains('failed')`, and the
+  // only real outcome is a `NativeGestureOutcome`, which renders as
+  // `Instance of 'NativeGestureOutcome'`. Every run scored 0.92, so
+  // `confidence < 0.5` never held and the audit trail only ever grew in a test
+  // that called `app.recovery.executeReflectionRecovery` by hand.
+  //
+  // These tests go through `runAutomation` — the real planner, the real
+  // `ScreenSanitizer`, the real `PolicyEngine`, the real `ConsentGate`, the real
+  // `NativeGestureExecutor` and the real `NativeBridge` — and make the platform
+  // fail the way a real one fails. Nothing here drives the recovery engine
+  // directly, which is the whole claim.
+  group('a run the platform fails reaches recovery, through the pipeline', () {
+    late NativeBridge bridge;
+
+    setUp(() {
+      platform.install(<String, Future<Object?> Function(MethodCall call)>{
+        kMethodServiceStatus: (MethodCall call) async =>
+            _connectedStatus(nodeCount: _dump().length),
+        kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
+          'nodes': _dump(),
+          'nodeCount': _dump().length,
+        },
+        kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
+          'allowed': true,
+          'message': 'ok',
+        },
+        // The shape `AccessibilityService.dispatchGesture` produces when the
+        // system cancels the gesture: a PlatformException, which
+        // `NativeBridge.dispatchGesture` turns into a not-executed outcome
+        // carrying the code.
+        kMethodDispatchGesture: (MethodCall call) async =>
+            throw PlatformException(code: kCodeNativeDispatchFailed),
+      });
+      bridge = NativeBridge();
+    });
+
+    tearDown(() async {
+      await bridge.dispose();
+    });
+
+    test(
+      'a dispatched gesture the platform failed is scored, recovered and logged',
+      () async {
+        final NoirComposition app = await open(bridge: bridge);
+        addTearDown(app.dispose);
+
+        // Subscribed first, so the recovery row cannot arrive before this
+        // stream has a listener and be dropped by the broadcast.
+        final Future<SafetyEvent> published = app
+            .safetyEvents()
+            .where((SafetyEventState state) => state is SafetyEventAvailable)
+            .cast<SafetyEventAvailable>()
+            .expand((SafetyEventAvailable state) => state.events)
+            .firstWhere(
+              (SafetyEvent event) => event.kind == SafetyEventKind.recovery,
+            );
+
+        final Future<RuntimeResult?> run = app.runAutomation(
+          const AutomationRequest(action: 'read_screen', input: 'Send message'),
+        );
+        final PendingConfirmation confirmation = await app.confirmations.first;
+        confirmation.answer(true);
+
+        final RuntimeResult? result = await run;
+
+        // The gesture really was dispatched, and the platform really did fail it.
+        expect(
+          platform.methods,
+          contains(kMethodDispatchGesture),
+          reason:
+              'a run that never reached the platform proves nothing about '
+              'what happens when one does and fails',
+        );
+        // The critic read the outcome's own fields, not a rendering of it.
+        expect(result!.reflectionEvent!.confidenceScore, 0.30);
+        expect(result.reflectionEvent!.degradedToNeedsReview, isTrue);
+        expect(result.reflectionEvent!.needsReview(), isTrue);
+        // And the run ended as the recovery engine's own block, not as a success
+        // with a low score attached.
+        expect(result.blocked, isTrue);
+        expect((result.result as GateResult).message, 'RECOVERY_NEEDS_REVIEW');
+        expect(app.taskRun.state, TaskState.failed);
+
+        // The audit entry the Safety Center will read came out of this run, and
+        // its score is the one the critic produced: 0.30 scaled to 30.
+        final Map<String, dynamic> audit = app.recovery.auditTrail.single;
+        expect(audit['taskId'], app.taskRun.controller.taskId);
+        expect(audit['confidenceScore'], 30);
+
+        final SafetyEvent event = await published;
+        expect(event.badge, 'RECOVERY_BLOCKED');
+        expect(event.detail, contains('confidence 30/100'));
+      },
+    );
+
+    test(
+      'a run nobody can confirm is blocked before the critic is reached',
+      () async {
+        final NoirComposition app = await open(
+          bridge: bridge,
+          consentTimeout: const Duration(milliseconds: 120),
+        );
+        addTearDown(app.dispose);
+
+        final RuntimeResult? result = await app.runAutomation(
+          const AutomationRequest(action: 'read_screen', input: 'Send message'),
+        );
+
+        // An unanswered confirmation blocks in the gate, which is upstream of
+        // the critic: this is a block, not a low-confidence reflection, and it
+        // must not grow an A4 audit row.
+        expect(result!.blocked, isTrue);
+        expect(result.reflection, isNull);
+        expect(result.reflectionEvent, isNull);
+        expect(app.recovery.auditTrail, isEmpty);
+      },
+    );
+  });
+
   group('the undo window is a real control, not a picture of one', () {
     // `UndoToast` used to render a permanently disabled button captioned
     // "Disabled: undo is not wired to an action executor yet." The runtime
@@ -1008,49 +1131,61 @@ void main() {
       expect(dispatches(), hasLength(1));
     });
 
-    test(
-      'a compensation with nothing to aim at reports the real reason',
-      () async {
-        // The same graph over a dump with no back affordance: the compensating
-        // run plans against the real screen, finds no node it can aim at, and the
-        // executor's own block code is what the user is told.
-        platform.install(<String, Future<Object?> Function(MethodCall call)>{
-          kMethodServiceStatus: (MethodCall call) async =>
-              _connectedStatus(nodeCount: _dump().length),
-          kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
-            'nodes': _dump(),
-            'nodeCount': _dump().length,
-          },
-          kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
-            'allowed': true,
-            'message': 'ok',
-          },
-          kMethodDispatchGesture: (MethodCall call) async => <String, dynamic>{
-            'executed': true,
-          },
-        });
-        final NoirComposition app = await open(bridge: bridge);
-        addTearDown(app.dispose);
-        final List<ActionCompletedWithUndoWindow> announced = announcements(
-          app,
-        );
+    test('a compensation with nothing to aim at reports the real reason', () async {
+      // The same graph over a dump with no back affordance: the compensating
+      // run plans against the real screen, finds no node it can aim at, and the
+      // executor's own block code is what the user is told.
+      platform.install(<String, Future<Object?> Function(MethodCall call)>{
+        kMethodServiceStatus: (MethodCall call) async =>
+            _connectedStatus(nodeCount: _dump().length),
+        kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
+          'nodes': _dump(),
+          'nodeCount': _dump().length,
+        },
+        kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
+          'allowed': true,
+          'message': 'ok',
+        },
+        kMethodDispatchGesture: (MethodCall call) async => <String, dynamic>{
+          'executed': true,
+        },
+      });
+      final NoirComposition app = await open(bridge: bridge);
+      addTearDown(app.dispose);
+      final List<ActionCompletedWithUndoWindow> announced = announcements(app);
 
-        final Future<RuntimeResult?> run = await launch(
-          app,
-          const AutomationRequest(action: 'navigate', input: 'Send message'),
-        );
-        while (announced.isEmpty) {
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-        }
-        final Future<UndoResult> undo = app.undo(announced.single.actionId);
-        (await app.confirmations.first).answer(true);
+      final Future<RuntimeResult?> run = await launch(
+        app,
+        const AutomationRequest(action: 'navigate', input: 'Send message'),
+      );
+      while (announced.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final Future<UndoResult> undo = app.undo(announced.single.actionId);
+      (await app.confirmations.first).answer(true);
 
-        final UndoResult refused = await undo;
-        expect((await run)!.blocked, isFalse);
-        expect(refused, isA<UndoRefused>());
-        expect((refused as UndoRefused).reason, kCodeMalformedGestureTarget);
-      },
-    );
+      final UndoResult refused = await undo;
+      // `run` is the *original* navigation, not the compensation: it really was
+      // dispatched and confirmed, so it is still a successful run.
+      expect((await run)!.blocked, isFalse);
+
+      // The compensation is a different run, and the executor reported that
+      // nothing was dispatched for it. The A12 critic reads that off the
+      // outcome's own fields now, so the compensating run scores below the
+      // threshold and the pipeline routes it to A4 instead of reporting it as
+      // a success. That is the same defect this mapping was written to close:
+      // an `executed: false` outcome used to score 0.92.
+      //
+      // What the undo reports is therefore the recovery engine's block code
+      // rather than the executor's narrower `MALFORMED_GESTURE_TARGET`, because
+      // the recovery engine returns its own code and does not carry the outcome
+      // out with it. Recorded as an honest limit rather than worked around:
+      // the recovery engine's return value and the undo's refusal path are both
+      // out of scope for this change, and the refusal is still a real code from
+      // a real stage rather than one invented here.
+      expect(refused, isA<UndoRefused>());
+      expect((refused as UndoRefused).reason, 'RECOVERY_NEEDS_REVIEW');
+    });
   });
 
   group('nothing in the new code is a stub', () {

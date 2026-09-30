@@ -18,16 +18,22 @@
 // two every other integration test in this tree substitutes: the platform channel
 // and the fact that no human is present to answer a confirmation.
 //
-// On driving the engine: `AgentRuntimePipeline` reaches
-// `executeReflectionRecovery` only when `ReflectionCritic.computeConfidence`
-// scores below 0.5, and that function can only get there for an execution
-// outcome that is null or whose `toString()` contains "failed"/"error". The
-// shipped executor always returns a `NativeGestureOutcome`, which has the default
-// `toString`, so with the current critic the recovery branch is not reachable
-// from `runAutomation`. The test says so rather than pretending otherwise, and
-// drives the graph's own engine directly instead: the same instance the pipeline
-// would call, with the same argument type, and everything downstream of the call
-// is the shipped path.
+// On driving the engine directly: the critic used to be unreachable here —
+// `ReflectionCritic.computeConfidence` scored an execution with
+// `executed.toString().contains('failed')`, and the shipped executor always
+// answers with a `NativeGestureOutcome`, which has the default `toString` — so
+// this file had to call `app.recovery.executeReflectionRecovery` itself and say
+// so. That has changed: the critic now reads the outcome's own fields, and a
+// real failed run through `runAutomation` reaches the recovery branch. The
+// end-to-end proof of that lives in test/composition_root_test.dart, where the
+// platform is made to fail a dispatched gesture.
+//
+// These tests still drive the engine directly, and that is a deliberate choice
+// rather than a workaround: they pin what the Safety Center renders for a given
+// audit record, so the record is supplied directly and the row can be read
+// without arranging a platform failure to produce it. Everything downstream of
+// the call — the engine, the audit entry, the graph's own log, the screen — is
+// the shipped path.
 //
 // The graph is opened in `setUp` rather than inside `testWidgets` on purpose. A
 // widget test body runs in a fake-async zone, and opening the graph does real
@@ -80,10 +86,10 @@ void main() {
   /// Runs the graph's own A4 recovery on a reflection the critic would have
   /// scored below the threshold, and returns what the run actually returned.
   ///
-  /// `executed` is null because that is the observation the shipped critic reads
-  /// as low confidence: nothing came back from the screen. The engine does not
-  /// look at it, and inventing an outcome object here would be a fabricated
-  /// fixture standing in for a real one.
+  /// The reflection is supplied rather than produced, so the assertions below
+  /// are about one known record — the header explains why. `executed` is null
+  /// because the engine does not read it: it is the observation the critic
+  /// already read, and the record it produced is what the engine is handed.
   Future<RuntimeResult> runRecovery() =>
       app.recovery.executeReflectionRecovery(Reflection(confidence: 0.3), null);
 

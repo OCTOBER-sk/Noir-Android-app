@@ -79,6 +79,15 @@ class _Platform {
   final TestDefaultBinaryMessenger messenger;
   final List<MethodCall> received = <MethodCall>[];
 
+  /// Whether the platform reports that a dispatched gesture actually happened.
+  ///
+  /// `false` is the honest "the platform took the call and did not do the
+  /// thing" answer, which is a real state a service can be in — the node moved
+  /// between the dump and the tap, the gesture was rejected, the window was not
+  /// there. It is the answer that separates a run that happened from a run that
+  /// merely returned.
+  bool confirmExecution = true;
+
   void install() {
     messenger.setMockMethodCallHandler(_channel, (MethodCall call) async {
       received.add(call);
@@ -101,7 +110,7 @@ class _Platform {
         case kMethodPolicyGate:
           return <String, dynamic>{'allowed': true, 'message': 'ok'};
         case kMethodDispatchGesture:
-          return <String, dynamic>{'executed': true};
+          return <String, dynamic>{'executed': confirmExecution};
       }
       throw MissingPluginException(call.method);
     });
@@ -442,6 +451,67 @@ void main() {
       expect(stored.runCount, 0);
       expect(stored.lastError, isNotNull);
       expect(stored.isDueAt(DateTime.now().toUtc()), isTrue);
+    });
+  });
+
+  group('a run that returned is not a run that happened', () {
+    test('a job the platform did not confirm is failed, not succeeded', () async {
+      // The whole run is real: the real graph, the real policy engine, the real
+      // confirmation a human answers, and a real dispatch. Only the platform's
+      // own answer differs — it took the call and reports the gesture did not
+      // happen. That is a state a real service is in when the node moved
+      // between the dump and the tap.
+      platform.confirmExecution = false;
+      final NoirComposition app = await open();
+      final AutomationsWired wired = app.automations as AutomationsWired;
+      await scheduleDue(wired.service, id: 'morning');
+      addTearDown(app.dispose);
+
+      final Future<AutomationDispatch> dispatch = app.runDueAutomations();
+      (await app.confirmations.first).answer(true);
+      final AutomationDispatched dispatched =
+          await dispatch as AutomationDispatched;
+
+      // The gesture was genuinely dispatched, so this is not a "never reached
+      // the platform" case dressed up as one.
+      expect(platform.dispatches, hasLength(1));
+      expect(
+        dispatched.runs.single.outcome,
+        AutomationOutcome.failed,
+        reason: 'an unconfirmed answer is not a completion',
+      );
+      // And the record a user reads says so, rather than a green line for work
+      // that did not happen.
+      final Automation stored = (await wired.service.find('morning'))!;
+      expect(stored.lastError, isNotNull);
+      expect(
+        stored.lastError,
+        isNot(contains('Instance of')),
+        reason: 'a lastError that names no reason names nothing',
+      );
+    });
+
+    test('a blocked job records the reason, not a type name', () async {
+      // The policy denies at the scheduler's own gate, which is before the
+      // pipeline — so this exercises the refusal text, and proves the record a
+      // user reads is a reason and never a rendered Dart object.
+      final NoirComposition app = await open();
+      final AutomationsWired wired = app.automations as AutomationsWired;
+      app.policy.uiLock = true;
+      await scheduleDue(wired.service, id: 'morning');
+      addTearDown(app.dispose);
+
+      final AutomationDispatched dispatched =
+          await app.runDueAutomations() as AutomationDispatched;
+
+      expect(dispatched.runs.single.outcome, AutomationOutcome.denied);
+      final Automation stored = (await wired.service.find('morning'))!;
+      expect(stored.lastError, contains('UI_LOCK'));
+      expect(
+        stored.lastError,
+        isNot(contains('Instance of')),
+        reason: 'GateResult has no toString; a record built off one is a lie',
+      );
     });
   });
 

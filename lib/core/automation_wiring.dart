@@ -26,7 +26,12 @@
 // interpretation of a job that is not a real [AutomationRequest].
 library;
 
-import '../agent/agent_runtime.dart' show RuntimeResult;
+import '../agent/agent_runtime.dart'
+    show
+        ExecutionSignal,
+        RuntimeResult,
+        executionConfirmed,
+        reportedBlockReason;
 import '../automations/automation_models.dart';
 import '../safety/policy_engine.dart';
 import '../safety/risk_classifier.dart';
@@ -210,10 +215,55 @@ class ConsentGatedAutomationExecutor implements AutomationExecutor {
     }
     if (result.blocked) {
       throw ScheduledAutomationRefused(
-        describeAutomationError(result.result ?? 'BLOCKED'),
+        describeAutomationError(_blockReason(result)),
+      );
+    }
+    // Not blocked is not the same as done. A run that was never stopped still
+    // has to have been *performed*, and the only thing that says so is the
+    // executor's own confirmation — read through `executionConfirmed`, the same
+    // reader the undo window and the A12 critic use, so a scheduled job cannot
+    // be recorded as succeeded on an answer that reports no work.
+    if (!executionConfirmed(result.result)) {
+      throw ScheduledAutomationRefused(
+        describeAutomationError(_unconfirmedReason(result.result)),
       );
     }
   }
+}
+
+/// What a run the executor did not confirm is recorded as having failed with.
+///
+/// Read through [ExecutionSignal] and never off a rendering: the shipped
+/// answer is a `NativeGestureOutcome`, whose default `toString` is
+/// `Instance of 'NativeGestureOutcome'`, so the same mistake this file had for
+/// [GateResult] would have been repeated here with a different class name.
+/// Precedence is the platform's own code first — it is the one a reader can
+/// act on — then the reason a stage named, and only then a stated absence.
+String _unconfirmedReason(Object? outcome) {
+  if (outcome is ExecutionSignal) {
+    final String code = outcome.platformCode?.trim() ?? '';
+    if (code.isNotEmpty) return code;
+    final String reason = reportedBlockReason(outcome)?.trim() ?? '';
+    if (reason.isNotEmpty) return reason;
+  }
+  return 'the platform answered without confirming the action';
+}
+
+/// What a blocked scheduled run is recorded as having failed with.
+///
+/// Three readings of the same run, in order of specificity, and never a
+/// rendering: the reason the executor itself named ([RuntimeResult.failureReason],
+/// which only exists when a real answer named one), then the gate's own message,
+/// then nothing. Read structurally because `GateResult` has no `toString`, so
+/// handing it to `describeAutomationError` directly wrote the literal
+/// `Instance of 'GateResult'` into a job's `lastError` — a user-facing record
+/// that named no reason at all.
+String _blockReason(RuntimeResult result) {
+  final String? reason = result.failureReason;
+  if (reason != null) return reason;
+  final Object? outcome = result.result;
+  if (outcome is GateResult) return outcome.message;
+  return 'BLOCKED';
 }
 
 /// A scheduled run that did not complete its work, with the reason it did not.

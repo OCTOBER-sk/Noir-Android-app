@@ -1305,3 +1305,89 @@ the real `PolicyEngine`, the real `ConsentGate`, the real `NativeGestureExecutor
 the real `NativeBridge` and the real `SanitizingRecoveryEngine` with a mocked
 platform channel — never by a person reading a toast on a phone. No claim is
 made here that one exists.
+
+## 2026-09-30 ~07:40 UTC — the first limit the 07:10 entry left open is closed
+
+The 07:10 entry closed the undo path and left one thing unclaimed on purpose:
+a scheduled automation that fails still recorded
+`describeAutomationError(result.result)`, so a job's `lastError` named the
+blanket `RECOVERY_NEEDS_REVIEW` where the D15 toast named the specific code.
+`d3175c1` is that work. This entry records it and what was re-measured, and
+corrects the reader's sense of scale: the case that entry called "one line of
+that file" was a defect, and the defect's symptom was not the blanket code at
+all.
+
+**The symptom was worse than the limit described.** `ConsentGatedAutomationExecutor`
+passed a `GateResult` to `describeAutomationError`, which calls `toString()` on
+it. `GateResult` has no `toString` override, so a denied or blocked job wrote
+the literal string `Instance of 'GateResult'` into its user-facing `lastError` —
+a record that named no reason whatsoever, not even a coarse one. The
+`RECOVERY_NEEDS_REVIEW` limit was the best case of a bug whose worst case was
+better than useless.
+
+**Delivered in `d3175c1`:**
+
+- `_blockReason(RuntimeResult)` reads the block structurally and in order of
+  specificity: the executor's own `RuntimeResult.failureReason` — the field
+  2d75ab7 added, now read by a second real caller rather than only by the undo
+  window — then the gate's own `GateResult.message`, then the stated absence
+  `'BLOCKED'`. A job's `lastError` now names the same specific code the D15
+  toast names, which is what the 07:10 entry said was not claimed.
+- `executionConfirmed(result.result)` gates the success path, which the previous
+  code did not check at all. The executor refused a blocked result and let an
+  unblocked result through unconditionally, so a run the platform never
+  confirmed was recorded as `succeeded`. "Not blocked" is not "done" — the same
+  distinction the A12 critic and the undo window already make from the same
+  reader, which is why it is imported from `agent_runtime.dart` rather than
+  reimplemented.
+- `_unconfirmedReason(Object?)` reads the unconfirmed case through
+  `ExecutionSignal` and never off a rendering. The shipped answer is a
+  `NativeGestureOutcome`, whose default `toString` is
+  `Instance of 'NativeGestureOutcome'` — the identical bug under a different
+  class name. The commit records that a probe caught exactly that on the first
+  attempt, which is the reason the reader is structural.
+
+**Re-measured on this host at this SHA (d3175c1), not read from the commit
+message:**
+
+- `flutter analyze` — `No issues found!`
+- `flutter test test/core/automation_executor_honesty_test.dart
+  test/integration/scheduled_automation_test.dart` — `+16: All tests passed!`
+- `dart format --output=none --set-exit-if-changed lib test` — the gate CI runs:
+  `Formatted 146 files (0 changed)`, exit 0.
+- CI: `Noir CI` on `d3175c1` concluded **success** (run created
+  2026-09-30T07:38:58Z). Every commit on main since `77cdf83` is green; the one
+  red run in the recent list, `77cdf83` itself, was the format-gate failure that
+  `485d17f` fixed.
+- Working tree clean, `main` level with `origin/main` at `d3175c1`. No worker
+  processes running, no `/tmp/noir-wt-*` worktrees present — the five files of
+  that name under `/tmp` are analyze logs from finished runs, not live trees.
+
+**The reachability caveat is load-bearing and is carried forward, not smoothed
+over.** The unconfirmed branch cannot be reached through the shipped A6 pipeline
+today: `computeConfidence` scores every unconfirmed run at 0.20 or 0.30, both
+under the 0.5 threshold, so such a run is always routed to recovery before the
+executor sees it. Its three tests are therefore driven at the executor's
+injectable `run` seam, not through the real graph. That branch is a fail-closed
+guard against a future implementer, not a path production takes today, and it
+should not be read as evidence that the app has been seen recording a false
+success. The blocked-reason case, which the pipeline *does* reach, is asserted
+in the integration suite against the real composition root.
+
+**The tests have teeth, checked by mutation rather than asserted.** With
+`lib/core/automation_wiring.dart` reverted to its pre-commit state, 4 of the 6 new
+tests go red — the 3 executor-contract tests and the real-graph blocked-reason
+test — while all 10 pre-existing tests in
+`test/integration/scheduled_automation_test.dart` stay green, so the new
+assertions are not passing on a change that leaves the old behaviour intact
+under a different assertion. The committed suite also asserts the absence
+directly: `expect(stored.lastError, isNot(contains('Instance of')))` — the
+defect named as a symptom rather than described as one.
+
+**Standing gap, unchanged:** no device or emulator run. Java and the Android SDK
+are still absent on this host, so nothing in this entry was observed on hardware.
+The claim here is narrower than the previous one's and is stated to match: the
+unconfirmed-run guard is verified against the executor's own seam with a mocked
+platform channel, and the blocked-reason fix is verified against the real
+composition root, the real gate and a real dispatch. Neither is a person
+watching a job's error field on a phone.

@@ -1000,9 +1000,7 @@ void main() {
 
       // The press, and no answer: the compensating run waits out the gate's own
       // bound and is refused, because silence is not consent.
-      final Future<UndoResult> refused = app.undo(
-        announced.single.actionId,
-      );
+      final Future<UndoResult> refused = app.undo(announced.single.actionId);
       expect(await refused, isA<UndoRefused>());
       await run;
 
@@ -1010,44 +1008,49 @@ void main() {
       expect(dispatches(), hasLength(1));
     });
 
-    test('a compensation with nothing to aim at reports the real reason', () async {
-      // The same graph over a dump with no back affordance: the compensating
-      // run plans against the real screen, finds no node it can aim at, and the
-      // executor's own block code is what the user is told.
-      platform.install(<String, Future<Object?> Function(MethodCall call)>{
-        kMethodServiceStatus: (MethodCall call) async =>
-            _connectedStatus(nodeCount: _dump().length),
-        kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
-          'nodes': _dump(),
-          'nodeCount': _dump().length,
-        },
-        kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
-          'allowed': true,
-          'message': 'ok',
-        },
-        kMethodDispatchGesture: (MethodCall call) async => <String, dynamic>{
-          'executed': true,
-        },
-      });
-      final NoirComposition app = await open(bridge: bridge);
-      addTearDown(app.dispose);
-      final List<ActionCompletedWithUndoWindow> announced = announcements(app);
+    test(
+      'a compensation with nothing to aim at reports the real reason',
+      () async {
+        // The same graph over a dump with no back affordance: the compensating
+        // run plans against the real screen, finds no node it can aim at, and the
+        // executor's own block code is what the user is told.
+        platform.install(<String, Future<Object?> Function(MethodCall call)>{
+          kMethodServiceStatus: (MethodCall call) async =>
+              _connectedStatus(nodeCount: _dump().length),
+          kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
+            'nodes': _dump(),
+            'nodeCount': _dump().length,
+          },
+          kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
+            'allowed': true,
+            'message': 'ok',
+          },
+          kMethodDispatchGesture: (MethodCall call) async => <String, dynamic>{
+            'executed': true,
+          },
+        });
+        final NoirComposition app = await open(bridge: bridge);
+        addTearDown(app.dispose);
+        final List<ActionCompletedWithUndoWindow> announced = announcements(
+          app,
+        );
 
-      final Future<RuntimeResult?> run = await launch(
-        app,
-        const AutomationRequest(action: 'navigate', input: 'Send message'),
-      );
-      while (announced.isEmpty) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      final Future<UndoResult> undo = app.undo(announced.single.actionId);
-      (await app.confirmations.first).answer(true);
+        final Future<RuntimeResult?> run = await launch(
+          app,
+          const AutomationRequest(action: 'navigate', input: 'Send message'),
+        );
+        while (announced.isEmpty) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        final Future<UndoResult> undo = app.undo(announced.single.actionId);
+        (await app.confirmations.first).answer(true);
 
-      final UndoResult refused = await undo;
-      expect((await run)!.blocked, isFalse);
-      expect(refused, isA<UndoRefused>());
-      expect((refused as UndoRefused).reason, kCodeMalformedGestureTarget);
-    });
+        final UndoResult refused = await undo;
+        expect((await run)!.blocked, isFalse);
+        expect(refused, isA<UndoRefused>());
+        expect((refused as UndoRefused).reason, kCodeMalformedGestureTarget);
+      },
+    );
   });
 
   group('nothing in the new code is a stub', () {

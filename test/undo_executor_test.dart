@@ -115,33 +115,36 @@ void main() {
     // the user had already reversed the action and "irreversible" whenever
     // nobody pressed anything.
     for (final _Ending ending in _Ending.values) {
-      test('a navigable action is reversible when the window ${ending.name}', () async {
-        final List<ActionCompletedWithUndoWindow> published =
-            <ActionCompletedWithUndoWindow>[];
-        final CountdownUndoWindow undo = CountdownUndoWindow(
-          publish: published.add,
-        );
-        addTearDown(undo.dispose);
-        final Future<UndoOutcome> outcome = undo.outcomes.first;
+      test(
+        'a navigable action is reversible when the window ${ending.name}',
+        () async {
+          final List<ActionCompletedWithUndoWindow> published =
+              <ActionCompletedWithUndoWindow>[];
+          final CountdownUndoWindow undo = CountdownUndoWindow(
+            publish: published.add,
+          );
+          addTearDown(undo.dispose);
+          final Future<UndoOutcome> outcome = undo.outcomes.first;
 
-        final UndoableAction action = _action(executor: _CountingExecutor());
-        expect(
-          action.isCompensatable,
-          isTrue,
-          reason: 'a navigation has an inverse this build can dispatch',
-        );
-        final Future<UndoState> opened = undo.open(
-          1,
-          action: action,
-          allowed: ending.opens,
-        );
-        if (ending == _Ending.cancelled) undo.cancel();
+          final UndoableAction action = _action(executor: _CountingExecutor());
+          expect(
+            action.isCompensatable,
+            isTrue,
+            reason: 'a navigation has an inverse this build can dispatch',
+          );
+          final Future<UndoState> opened = undo.open(
+            1,
+            action: action,
+            allowed: ending.opens,
+          );
+          if (ending == _Ending.cancelled) undo.cancel();
 
-        expect(published, hasLength(ending.opens ? 1 : 0));
-        if (ending.opens) expect(published.single.reversible, isTrue);
-        expect(await outcome, ending.expected);
-        await opened;
-      });
+          expect(published, hasLength(ending.opens ? 1 : 0));
+          if (ending.opens) expect(published.single.reversible, isTrue);
+          expect(await outcome, ending.expected);
+          await opened;
+        },
+      );
 
       test('an action with no inverse is irreversible when the window '
           '${ending.name}', () async {
@@ -176,7 +179,9 @@ void main() {
     test('a caller that may not open a window announces nothing', () async {
       final List<ActionCompletedWithUndoWindow> published =
           <ActionCompletedWithUndoWindow>[];
-      final CountdownUndoWindow undo = CountdownUndoWindow(publish: published.add);
+      final CountdownUndoWindow undo = CountdownUndoWindow(
+        publish: published.add,
+      );
       addTearDown(undo.dispose);
       final Future<UndoOutcome> outcome = undo.outcomes.first;
 
@@ -201,7 +206,9 @@ void main() {
     test('no window, no announcement, and the reason is notExecuted', () async {
       final List<ActionCompletedWithUndoWindow> published =
           <ActionCompletedWithUndoWindow>[];
-      final CountdownUndoWindow undo = CountdownUndoWindow(publish: published.add);
+      final CountdownUndoWindow undo = CountdownUndoWindow(
+        publish: published.add,
+      );
       addTearDown(undo.dispose);
       final Future<UndoOutcome> outcome = undo.outcomes.first;
 
@@ -222,24 +229,31 @@ void main() {
   });
 
   group('the live window carries the action until it ends', () {
-    test('cancelling releases the action, so a second press finds nothing', () async {
-      final CountdownUndoWindow undo = CountdownUndoWindow();
-      addTearDown(undo.dispose);
+    test(
+      'cancelling releases the action, so a second press finds nothing',
+      () async {
+        final CountdownUndoWindow undo = CountdownUndoWindow();
+        addTearDown(undo.dispose);
 
-      final UndoableAction action = _action(executor: _CountingExecutor());
-      final Future<UndoState> opened = undo.open(30, action: action);
+        final UndoableAction action = _action(executor: _CountingExecutor());
+        final Future<UndoState> opened = undo.open(30, action: action);
 
-      final LiveUndoWindow? live = undo.live;
-      expect(live, isNotNull);
-      expect(live!.action.isCompensatable, isTrue);
-      expect(live.action.plan.content, action.plan.content);
-      expect(identical(live.action.executor, action.executor), isTrue);
+        final LiveUndoWindow? live = undo.live;
+        expect(live, isNotNull);
+        expect(live!.action.isCompensatable, isTrue);
+        expect(live.action.plan.content, action.plan.content);
+        expect(identical(live.action.executor, action.executor), isTrue);
 
-      undo.cancel();
-      await opened;
+        undo.cancel();
+        await opened;
 
-      expect(undo.live, isNull, reason: 'a spent window holds nothing to undo');
-    });
+        expect(
+          undo.live,
+          isNull,
+          reason: 'a spent window holds nothing to undo',
+        );
+      },
+    );
 
     test('a window nobody cancelled still releases the action', () async {
       final CountdownUndoWindow undo = CountdownUndoWindow();
@@ -297,8 +311,11 @@ void main() {
         'navigate "maps"',
       );
       expect(
-        _action(verb: 'tap', input: '', executor: _CountingExecutor())
-            .description,
+        _action(
+          verb: 'tap',
+          input: '',
+          executor: _CountingExecutor(),
+        ).description,
         'tap',
       );
     });

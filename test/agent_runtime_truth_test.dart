@@ -114,9 +114,8 @@ class _NavigationPlanner extends Planner {
 /// Plans a tap: also STANDARD, and with no inverse.
 class _TapPlanner extends Planner {
   @override
-  Future<Plan> plan(dynamic context) async => const Plan(
-    content: <String, dynamic>{'action': 'tap', 'input': 'maps'},
-  );
+  Future<Plan> plan(dynamic context) async =>
+      const Plan(content: <String, dynamic>{'action': 'tap', 'input': 'maps'});
 }
 
 /// An opener that records what it was asked for, so the pipeline's own half of
@@ -276,10 +275,7 @@ void main() {
       final CountdownUndoWindow undo = CountdownUndoWindow();
       final Future<UndoOutcome> first = undo.outcomes.first;
 
-      final Future<UndoState> opened = undo.open(
-        1,
-        action: _navigation(),
-      );
+      final Future<UndoState> opened = undo.open(1, action: _navigation());
       final UndoOutcome outcome = await first;
 
       expect(outcome, UndoOutcome.elapsed);
@@ -291,10 +287,7 @@ void main() {
       final CountdownUndoWindow undo = CountdownUndoWindow();
       final Future<UndoOutcome> first = undo.outcomes.first;
 
-      final Future<UndoState> opened = undo.open(
-        30,
-        action: _navigation(),
-      );
+      final Future<UndoState> opened = undo.open(30, action: _navigation());
       undo.cancel();
 
       expect(await first, UndoOutcome.cancelled);
@@ -311,10 +304,7 @@ void main() {
         },
       );
 
-      final Future<UndoState> opened = undo.open(
-        12,
-        action: _navigation(),
-      );
+      final Future<UndoState> opened = undo.open(12, action: _navigation());
       expect(seen, 12);
       undo.cancel();
       await opened;
@@ -383,37 +373,43 @@ void main() {
       expect(action.isCompensatable, isTrue);
     });
 
-    test('an action with no inverse opens a window that is not reversible', () async {
-      final List<String> order = <String>[];
-      final _RecordingOpener opener = _RecordingOpener(order);
-      final _OrderingExecutor executor = _OrderingExecutor(order, _executed);
+    test(
+      'an action with no inverse opens a window that is not reversible',
+      () async {
+        final List<String> order = <String>[];
+        final _RecordingOpener opener = _RecordingOpener(order);
+        final _OrderingExecutor executor = _OrderingExecutor(order, _executed);
 
-      await _navigationPipeline(
-        opener: opener,
-        executor: executor,
-        planner: _TapPlanner(),
-      ).run(null);
+        await _navigationPipeline(
+          opener: opener,
+          executor: executor,
+          planner: _TapPlanner(),
+        ).run(null);
 
-      expect(opener.allowed, isTrue);
-      expect(opener.action!.isCompensatable, isFalse);
-      expect(opener.action!.compensation, isNull);
-    });
+        expect(opener.allowed, isTrue);
+        expect(opener.action!.isCompensatable, isFalse);
+        expect(opener.action!.compensation, isNull);
+      },
+    );
 
-    test('an action the executor could not confirm is carried as such', () async {
-      final List<String> order = <String>[];
-      final _RecordingOpener opener = _RecordingOpener(order);
-      final _OrderingExecutor executor = _OrderingExecutor(
-        order,
-        NativeGestureOutcome(
-          executed: false,
-          verdict: const NativeGateVerdict.blocked(kCodeNativeDispatchFailed),
-        ),
-      );
+    test(
+      'an action the executor could not confirm is carried as such',
+      () async {
+        final List<String> order = <String>[];
+        final _RecordingOpener opener = _RecordingOpener(order);
+        final _OrderingExecutor executor = _OrderingExecutor(
+          order,
+          NativeGestureOutcome(
+            executed: false,
+            verdict: const NativeGateVerdict.blocked(kCodeNativeDispatchFailed),
+          ),
+        );
 
-      await _navigationPipeline(opener: opener, executor: executor).run(null);
+        await _navigationPipeline(opener: opener, executor: executor).run(null);
 
-      expect(opener.action!.completed, isFalse);
-    });
+        expect(opener.action!.completed, isFalse);
+      },
+    );
 
     test('a SAFE action is not offered a window at all', () async {
       final List<String> order = <String>[];

@@ -440,11 +440,7 @@ class CountdownUndoWindow implements UndoWindowOpener {
     // countdown is still running. The live record is in place before it is
     // published too, so a press that arrives with the announcement already has
     // an action to press it on.
-    _live = LiveUndoWindow(
-      actionId: actionId,
-      action: action,
-      window: window,
-    );
+    _live = LiveUndoWindow(actionId: actionId, action: action, window: window);
     publish?.call(
       ActionCompletedWithUndoWindow(
         action.description,

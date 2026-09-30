@@ -1768,8 +1768,7 @@ class _UndoToastState extends State<UndoToast> {
   /// one has reported: the compensating run is single-use, and a control that
   /// stays live after it would invite a second undo of an action that has
   /// already been reversed.
-  bool get _canUndo =>
-      widget.onUndo != null && !_working && _result == null;
+  bool get _canUndo => widget.onUndo != null && !_working && _result == null;
 
   /// What this toast can say, and every branch of it is true in both the wired
   /// and the unwired build.

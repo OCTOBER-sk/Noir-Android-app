@@ -71,7 +71,11 @@ void main() {
   Widget host(
     ActionCompletedWithUndoWindow event, {
     Future<UndoResult> Function(String actionId)? onUndo,
-  }) => MaterialApp(home: Scaffold(body: UndoToast(event: event, onUndo: onUndo)));
+  }) => MaterialApp(
+    home: Scaffold(
+      body: UndoToast(event: event, onUndo: onUndo),
+    ),
+  );
 
   /// Whether the control advertises itself as a pressable button.
   bool live(WidgetTester tester) {
@@ -185,9 +189,14 @@ void main() {
     });
 
     testWidgets('the stale claim is gone from the widget', (tester) async {
-      await tester.pumpWidget(host(reversibleWindow, onUndo: (_) async {
-        return const UndoPerformed('undo-1');
-      }));
+      await tester.pumpWidget(
+        host(
+          reversibleWindow,
+          onUndo: (_) async {
+            return const UndoPerformed('undo-1');
+          },
+        ),
+      );
 
       expect(find.textContaining(staleClaim), findsNothing);
     });
@@ -209,19 +218,12 @@ void main() {
   });
 
   group('CommandCentreScreen threads the undo executor to the toast', () {
-    Future<
-      ({
-        FakeStateSource<NoirUiEvent> events,
-        List<String> pressed,
-      })
-    >
-    pumpScreen(
-      WidgetTester tester, {
-      required bool withExecutor,
-    }) async {
+    Future<({FakeStateSource<NoirUiEvent> events, List<String> pressed})>
+    pumpScreen(WidgetTester tester, {required bool withExecutor}) async {
       final ConversationController controller = ConversationController();
       addTearDown(controller.close);
-      final FakeStateSource<NoirUiEvent> events = FakeStateSource<NoirUiEvent>();
+      final FakeStateSource<NoirUiEvent> events =
+          FakeStateSource<NoirUiEvent>();
       addTearDown(events.close);
       final List<String> pressed = <String>[];
 

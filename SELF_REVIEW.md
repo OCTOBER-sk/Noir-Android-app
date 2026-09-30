@@ -1831,3 +1831,45 @@ hardware.
 design-question items carried forward from earlier entries (gate refusals never
 reaching recovery; the 0.20 rung unit-covered only; the overlapping audit row in
 `composition_root_test.dart`) remain open by choice.
+
+---
+
+## Heartbeat 2026-09-30 14:24
+
+**State.** `main` at `08af109`, level with `origin/main` after `git fetch`
+(both `08af1096262266e0af645ebfaa511a022f961bef`), working tree clean, no
+stashes, `git branch --no-merged main` empty. `git worktree list` shows only
+the main checkout — the `/tmp/noir-wt-*` paths from earlier workers no longer
+exist; the surviving `.log` files under `/tmp` are stale artifacts, newest
+mtime `2026-09-30 12:12` (`recovery-e2e`), nothing touched since. `ps` matched
+no `opencode`, `claude`, `codex`, `flutter`, `dart` or `gradle` process. No
+worker is in flight and there is nothing to integrate.
+
+**Re-verified on `main` at `08af109`**, run by the supervisor directly in the
+main checkout (working tree was clean before and after, so this left no trace):
+
+- `flutter analyze` — `No issues found!` (1.0s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1041**.
+
+`git diff --stat 8835b72 HEAD` is `SELF_REVIEW.md` only (+39), so the Dart
+surface measured above is identical to the 13:38 verification; only the doc
+changed since.
+
+**CI.** Latest run is still **36713571920** on `70801a8` (`success`, 3m54s).
+`08af109` and `8835b72` touch `SELF_REVIEW.md` only, so they have no CI run of
+their own; the Dart gates they would run are the ones measured above.
+
+**Spend.** This heartbeat dispatched no agent and started no long-running
+worker; the only processes were the local gates run by the supervisor itself.
+No model was selected and no cost was incurred. `opencode/space-bunny-free`
+remains the only permitted route; no paid model and no OpenRouter fallback.
+
+**Standing gap, unchanged:** no device or emulator run. Java and the Android SDK
+are absent on this host, so the `PlatformException` correspondence between the
+Dart stub and the Kotlin service is asserted from source, not observed on
+hardware.
+
+**Next action:** nothing to do until new work is dispatched. The deliberate
+design-question items carried forward (gate refusals never reaching recovery;
+the 0.20 rung unit-covered only; the overlapping audit row in
+`composition_root_test.dart`) remain open by choice.

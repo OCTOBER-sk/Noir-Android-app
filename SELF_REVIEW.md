@@ -1792,3 +1792,42 @@ observed on hardware. Every claim here is about the Dart composition root.
 known-design-question items recorded in the previous section (gate refusals
 never reaching recovery; the 0.20 rung unit-covered only; the overlapping audit
 row in `composition_root_test.dart`) are deliberate and were left as-is.
+
+---
+
+## Heartbeat 2026-09-30 13:38
+
+**State.** `main` at `8835b72`, level with `origin/main` (0 ahead), working tree
+clean, no stashes, `git branch --no-merged main` empty across 29 local branches.
+`git worktree list` shows only the main checkout. `ps` matched no `opencode`,
+`claude`, `codex`, `flutter`, `dart` or `gradle` process at inspection time. No
+worker is in flight and there is nothing to integrate.
+
+**Re-verified on `main` at `8835b72`** in a throwaway detached worktree
+(`/tmp/noir-hb-1338`, removed afterwards):
+
+- `flutter pub get` — resolved; only the pre-existing `vector_math` /
+  newer-version constraint note.
+- `flutter analyze` — `No issues found!` (3.1s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1041**.
+- `dart format --set-exit-if-changed lib test` — 146 files, 0 changed, exit 0.
+
+**CI.** Run **36713571920** on `70801a8` is `success` (`Noir CI`, 3m54s). There
+is no run for `8835b72`: that commit touches `SELF_REVIEW.md` only
+(`git diff --stat 70801a8 HEAD` is one file, +51), so the Dart gates CI would run
+are the ones measured above locally.
+
+**Spend.** This heartbeat dispatched no agent and started no long-running
+worker; the only processes were the local gates, run by the supervisor itself.
+No model was selected and no cost was incurred. `opencode/space-bunny-free`
+remains the only permitted route; no paid model and no OpenRouter fallback.
+
+**Standing gap, unchanged:** no device or emulator run. Java and the Android SDK
+are absent on this host, so the `PlatformException` correspondence between the
+Dart stub and the Kotlin service is asserted from source, not observed on
+hardware.
+
+**Next action:** nothing to do until new work is dispatched. The deliberate
+design-question items carried forward from earlier entries (gate refusals never
+reaching recovery; the 0.20 rung unit-covered only; the overlapping audit row in
+`composition_root_test.dart`) remain open by choice.

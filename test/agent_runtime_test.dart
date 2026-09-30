@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noir_android_app/agent/agent_runtime.dart';
+import 'package:noir_android_app/platform/native_bridge.dart';
 import 'package:noir_android_app/safety/policy_engine.dart';
 import 'package:noir_android_app/safety/risk_classifier.dart';
 import 'package:noir_android_app/safety/screen_content_sanitizer.dart';
@@ -50,13 +51,21 @@ class _UndoWindowOpener extends UndoWindowOpener {
   }
 }
 
+/// Answers the way the shipped executor answers: a `NativeGestureOutcome`, the
+/// only type the A12 reflection critic can read. A bare string here would score
+/// as "no observation" and send the run to recovery, which is the honest answer
+/// for an answer nothing can interpret — and not what a run whose gesture was
+/// confirmed should look like.
 class _Executor extends Executor {
   int calls = 0;
 
   @override
   Future<dynamic> run(Plan plan) async {
     calls += 1;
-    return 'executed';
+    return const NativeGestureOutcome(
+      executed: true,
+      verdict: NativeGateVerdict(allowed: true, message: 'ok'),
+    );
   }
 }
 

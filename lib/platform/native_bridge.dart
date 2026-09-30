@@ -15,7 +15,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-import '../agent/agent_runtime.dart' show ExecutionReport;
+import '../agent/agent_runtime.dart' show ExecutionReport, ExecutionSignal;
 import '../safety/policy_engine.dart' show GateResult, PolicyEngine;
 import '../safety/risk_classifier.dart' show RiskClassifier, RiskLevel;
 import '../safety/screen_content_sanitizer.dart'
@@ -175,11 +175,16 @@ class NativeGateVerdict {
 ///
 /// It is an [ExecutionReport] because that is exactly what it is, and the A6
 /// pipeline reads this type to decide whether the action completed enough to
-/// open an undo window for. Nothing else may stand in for it.
-class NativeGestureOutcome implements ExecutionReport {
+/// open an undo window for. Nothing else may stand in for it. It is also the
+/// app's only [ExecutionSignal]: [verdict] and [platformCode] are read by the
+/// A12 reflection critic to score the run, which is why [gateGranted] projects
+/// the gate's own answer rather than leaving the critic to reach into a
+/// platform type it must not import.
+class NativeGestureOutcome implements ExecutionReport, ExecutionSignal {
   @override
   final bool executed;
   final NativeGateVerdict verdict;
+  @override
   final String? platformCode;
   final Map<String, dynamic> receipt;
 
@@ -189,6 +194,14 @@ class NativeGestureOutcome implements ExecutionReport {
     this.platformCode,
     this.receipt = const <String, dynamic>{},
   });
+
+  /// The policy gate's answer for this run, as the A12 critic reads it.
+  ///
+  /// Non-null on every outcome this bridge builds, because every one of them
+  /// carries a verdict: a run that was refused is refused *by the gate*, and the
+  /// critic is meant to see that rather than infer it from `executed`.
+  @override
+  bool? get gateGranted => verdict.allowed;
 
   factory NativeGestureOutcome.blocked(
     NativeGateVerdict verdict, {

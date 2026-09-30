@@ -93,7 +93,7 @@ class AgentRuntimePipeline {
     final reflection = await reflectionCritic.analyze(
       plan,
       executed,
-      sanitized.cleanTextNodes.join('\n'),
+      sanitized,
     );
     // The event is built here, on the path every completed run takes, so it
     // cannot drift into being a claim nothing produces.
@@ -142,31 +142,112 @@ abstract class Executor {
   Future<dynamic> run(Plan plan);
 }
 
+// The A12 confidence ladder, named rather than inlined.
+//
+// The threshold that matters is the `0.5` in [AgentRuntimePipeline.run]: below it
+// the run goes to [RecoveryEngine], at or above it the run is reported as the
+// action it claims to be. Every negative score sits under that line on purpose.
+//
+// The order inside the negative half is a statement about how much the run
+// actually learned, not about how bad the failure was. [kConfidenceNoObservation]
+// is the only rung where nothing at all came back, and
+// [kConfidencePlatformErrorCode] is the only rung that carries a reason, which is
+// why it is the closest of the three to the threshold: it is the score an
+// operator reads for a real dispatch failure, and it is what the Safety Center
+// row will say, in points out of a hundred.
+
+/// Nothing was observed. The critic was handed something that is not an
+/// [ExecutionReport], so the pipeline has no evidence about the screen in either
+/// direction. Deliberately the lowest score: this is the one case where the app
+/// cannot even say that the action failed.
+const double kConfidenceNoObservation = 0.10;
+
+/// The action is known not to have happened.
+///
+/// The report says `executed == false`. Whether the gate refused the run outright
+/// or the platform simply never confirmed the gesture, the observed fact is the
+/// same one: the screen did not do what the plan asked, and no reason came back
+/// with it.
+const double kConfidenceNotExecuted = 0.20;
+
+/// The action is known not to have happened, and the platform said why.
+///
+/// A code off `lib/platform/native_bridge.dart` — `NATIVE_DISPATCH_FAILED`,
+/// `NATIVE_BRIDGE_UNAVAILABLE`, `MALFORMED_GESTURE_TARGET` and the rest — turns
+/// the refusal into a diagnosable one, so this is the negative score a reader can
+/// act on.
+const double kConfidencePlatformErrorCode = 0.30;
+
+/// The action happened, but the dump the critic was handed was not the whole
+/// screen.
+///
+/// [Sanitizer] stripped at least one node off it, which means something on that
+/// screen was zero-alpha, off-viewport, empty, invisible or bidi-overridden. The
+/// gesture is confirmed and the observation is not, so this stays above the
+/// threshold: a run like this is reported with a flag rather than sent to
+/// recovery, because nothing went wrong with the action.
+const double kConfidenceScreenSanitized = 0.60;
+
+/// The action happened, the gate granted it, the platform named no code and the
+/// dump was clean. A confident run, with nothing about it in doubt.
+const double kConfidenceConfirmed = 0.92;
+
+/// The code a failed report carries, or null when it carries none.
+///
+/// A report that is not an [ExecutionSignal] has no code to read, and a blank one
+/// says nothing, so neither is reported as a failure. Only a code the platform
+/// actually wrote counts.
+String? _reportedFailureCode(Object? outcome) {
+  if (outcome is! ExecutionSignal) return null;
+  final String code = outcome.platformCode?.trim() ?? '';
+  return code.isEmpty ? null : code;
+}
+
+/// A12 — what the critic decided about one run, read off the run's own evidence.
+///
+/// The score comes from the [ExecutionReport] the executor answered with, never
+/// from a rendering of it. It used to be
+/// `executed.toString().contains('failed')`, and the shipped executor's answer is
+/// a `NativeGestureOutcome`, whose default `toString` is
+/// `Instance of 'NativeGestureOutcome'` — so `confidence < 0.5` could not be true
+/// on any real run, and the A4 recovery audit trail was reachable only by driving
+/// [RecoveryEngine] by hand in a test.
+///
+/// There is deliberately **no** plan-vs-observed comparison here, and [p] is
+/// taken only because the pipeline hands every stage the plan it ran. Nothing in
+/// this pipeline re-reads the screen after the gesture, so there is no second
+/// observation to compare the first against. The platform receipt cannot stand
+/// in for one either: it echoes the coordinates the executor itself resolved and
+/// sent, so reading it back here would be the executor comparing its own output
+/// to itself. A comparison worth making needs a fresh screen read, which this
+/// build does not take; the comment that used to claim one was a claim about code
+/// that was not in this file.
 class ReflectionCritic {
   Future<Reflection> analyze(
     Plan p,
     dynamic executed,
-    String sanitizedScreenContent,
-  ) async => Reflection(
-    confidence: computeConfidence(p, executed, sanitizedScreenContent),
-  );
+    SanitizedResult screen,
+  ) async => Reflection(confidence: computeConfidence(p, executed, screen));
 
-  // A12 — real reflection: compares intended outcome (plan) vs observed screen state (executed result + sanitized content)
-  // Produces confidence score 0.0-1.0; low confidence (<0.5) routes to HierarchicalRecovery (A4)
-  double computeConfidence(Plan p, dynamic executed, String sanitizedContent) {
-    // If executed result indicates failure or mismatch with plan, confidence drops
-    if (executed == null ||
-        executed.toString().contains('failed') ||
-        executed.toString().contains('error')) {
-      return 0.3; // Low confidence -> trigger recovery
+  double computeConfidence(Plan p, dynamic executed, SanitizedResult screen) {
+    if (executed is! ExecutionReport) return kConfidenceNoObservation;
+    // Read through the same fail-closed rule the undo window is built on: an
+    // answer that is not a report is not a success, and `executionConfirmed` is
+    // where that rule already lives.
+    if (!executionConfirmed(executed)) {
+      return _reportedFailureCode(executed) == null
+          ? kConfidenceNotExecuted
+          : kConfidencePlatformErrorCode;
     }
-    // If screen content was heavily sanitized (injection detected), lower confidence slightly
-    if (sanitizedContent.contains('REASON_') ||
-        sanitizedContent.contains('stripped')) {
-      return 0.6; // Moderate confidence, still passes but flagged
+    // A confirmed gesture the gate never cleared would be the C2 invariant
+    // broken, not a successful run. `NativeBridge` cannot produce one — it fails
+    // closed before dispatching — so this read is here because the field is, and
+    // because a future implementer of [ExecutionReport] could.
+    if (executed is ExecutionSignal && executed.gateGranted == false) {
+      return kConfidenceNotExecuted;
     }
-    // Normal successful execution with clean screen content -> high confidence
-    return 0.92;
+    if (screen.stripped.isNotEmpty) return kConfidenceScreenSanitized;
+    return kConfidenceConfirmed;
   }
 }
 
@@ -293,6 +374,31 @@ const String kUndoUnconfirmed = 'UNDO_UNCONFIRMED';
 abstract class ExecutionReport {
   /// Whether a gesture really reached the accessibility service.
   bool get executed;
+}
+
+/// The part of an execution answer the A12 critic reads beyond "did it run".
+///
+/// [ExecutionReport] answers one question, and the undo window is entitled to
+/// exactly that one. The critic needs two more, and both are things the platform
+/// already reported rather than something it would have to infer: whether the
+/// gate cleared the run, and the code a failed run failed with.
+///
+/// Declared here beside [ExecutionReport] because the only implementer lives in
+/// `lib/platform/`, and that half must not import the pipeline.
+///
+/// A report that does not implement this carries no verdict and no code, and that
+/// is not read as a denial. Only an explicit `false` from [gateGranted] is a
+/// refusal, and only a non-blank [platformCode] is a failure: a type that opts
+/// out of the interface has not claimed anything went wrong, so it is not scored
+/// as though it had.
+abstract class ExecutionSignal extends ExecutionReport {
+  /// Whether the gate cleared this run, or null when the report carries no
+  /// verdict to read.
+  bool? get gateGranted;
+
+  /// The platform's own code for a run that did not happen, verbatim, or null
+  /// when it reported none.
+  String? get platformCode;
 }
 
 /// Whether [outcome] is the executor confirming that the action happened.

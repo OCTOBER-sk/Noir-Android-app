@@ -1174,3 +1174,134 @@ observed on hardware. It is verified by tests against the real composition root,
 the real `PolicyEngine`, the real `ConsentGate`, the real `NativeGestureExecutor`
 and the real `NativeBridge` with a mocked platform channel — never by a person
 watching a gesture land. No claim is made here that one exists.
+
+---
+
+## 2026-09-30 ~07:10 UTC — NOT idle: the undo toast now names what went wrong
+
+**The gap, and it is the one the last entry left open on purpose.**
+50767f2 made the A4 recovery branch reachable from a real run, and recorded the
+cost plainly: `SanitizingRecoveryEngine.executeReflectionRecovery`
+(`lib/core/agent_wiring.dart`) receives the real `NativeGestureOutcome` and
+returns `RuntimeResult.blocked(GateResult.blocked('RECOVERY_NEEDS_REVIEW'))`,
+discarding it. So a compensating run that failed for a specific reason — the
+screen had no node to aim at, the gate stopped it, the platform threw — ended a
+D15 undo with the blanket code, and
+`a compensation with nothing to aim at reports the real reason` had to be
+changed to expect `RECOVERY_NEEDS_REVIEW` and say why. The stated reason for
+leaving it alone was that the recovery engine's return value also feeds the
+Safety Center's safety log, which 22ed024 owns. That caution is respected here:
+the reason does not go *into* the return value, it goes beside it.
+
+**Delivered:**
+
+- `RuntimeResult.failureReason` (`lib/agent/agent_runtime.dart`) is the carrier:
+  a nullable `String?` on the result, set by
+  `RuntimeResult.blocked(policy, failureReason: …)`, null for every success and
+  for every block that has nothing specific to say. It travels beside
+  `RuntimeResult.result`, not inside it, so the `GateResult` — the code the
+  Safety Center's row means, and the whole of what 22ed024 renders — is
+  byte-for-byte what it was. `withReflectionEvent` carries it across the
+  recovery hop, which is the only hop a real caller reaches the engine through.
+- `ExecutionSignal` gains `String? get blockReason`, the "why did this run not
+  happen" answer, beside the "what did the platform say" answer it already had.
+  `NativeGestureOutcome.blockReason` already existed and is now the
+  implementation of it, unchanged. The interface widened rather than a signature,
+  for the reason 50767f2 gave: the `Executor`/`RecoveryEngine` boundary stays
+  `dynamic` and the reader narrows on the interface instead.
+  The two fields are different questions and are documented as such — a gate
+  refusal never reaches the platform, so it carries no `platformCode` and the
+  gate's own message is the only reason there is. That case is pinned by a test,
+  and it is the one a `platformCode`-only reader gets wrong.
+- `reportedBlockReason(Object?)` is the one reader, shared by nothing else and
+  used by the recovery engine: it narrows on `ExecutionSignal`, reads
+  `blockReason` structurally, and returns null unless the signal genuinely
+  carries a reason — not a signal, a run the platform *confirmed*, or a blank
+  string all report nothing. No `toString()` sniffing is reintroduced anywhere;
+  `'action failed'` is asserted to report no reason, which is the assertion that
+  would fail if it were.
+- `SanitizingRecoveryEngine` returns
+  `RuntimeResult.blocked(GateResult.blocked('RECOVERY_NEEDS_REVIEW'),
+  failureReason: reportedBlockReason(executed))`. Its audit row, its `onAudit`
+  sink, its task transitions and the code it returns are untouched.
+- `_undoResult` (`lib/core/composition_root.dart`) prefers `result.failureReason`
+  for a blocked run, after the `kUndoNotApproved` check and before the
+  `GateResult` message. `kUndoNotApproved` stays first on purpose: nobody
+  answering the gate is a fact about the press, not about the run the carried
+  reason would describe. The message stays the fallback, so a run with no
+  specific reason still reports the stage's own code.
+
+**The pre-existing test whose expectation this reverses, and why.**
+`a compensation with nothing to aim at reports the real reason` expects
+`kCodeMalformedGestureTarget` again instead of `'RECOVERY_NEEDS_REVIEW'`, and
+the reason is written in place: 50767f2 changed that expectation to close the
+`executed: false` scoring defect and recorded the loss of the specific code as a
+limit of that change. It is not a limit of the app. Both assertions in it still
+hold — the run is still `RECOVERY_NEEDS_REVIEW` and the refusal is still a
+refusal — and the one that changed now says what the executor said. A second
+test in the same group makes the same claim about a *different* failure, so the
+assertion cannot be satisfied by one code being hardcoded somewhere: a
+compensating gesture the platform then fails reports
+`kCodeNativeDispatchFailed`, and a compensating gesture with nothing to aim at
+reports `kCodeMalformedGestureTarget`.
+
+**Evidence, all measured on this branch:**
+
+- `flutter analyze`: `No issues found!`
+- `flutter test`: `+1034: All tests passed!` (1023 before this branch, +11 new,
+  none removed)
+- `dart format --output=none --set-exit-if-changed lib test` — the gate CI runs:
+  `Formatted 145 files (0 changed)`, exit 0.
+- The new tests have teeth, checked by mutating `lib/` five times rather than
+  asserted. Each mutation was run against
+  `test/agent_runtime_critic_signal_test.dart`, `test/agent_runtime_truth_test.dart`
+  and `test/composition_root_test.dart` and then reverted:
+  - `withReflectionEvent` dropping `failureReason` (the reason dies at the
+    pipeline's own hop) — **4 failures**: both compensation-refusal tests and
+    both pipeline-level reason tests;
+  - the recovery engine no longer passing `failureReason:` at all — **4
+    failures**, the same four;
+  - `_undoResult` ignoring the carried reason — **2 failures**, both
+    compensation-refusal tests, and the pipeline tests stay green because the
+    field is still on the result. That is the point of the two layers being
+    asserted separately;
+  - the reader reading `platformCode` instead of `blockReason` — **3 failures**:
+    the gate-refusal test in each of the two files, plus the
+    `MALFORMED_GESTURE_TARGET` compensation test, which is that same case seen
+    end to end;
+  - the reader dropping its `executionConfirmed` guard — **2 failures**: the
+    confirmed-run test and the interface test, i.e. the code would have been
+    invented for a run that did not fail.
+
+**Deliberately not changed:** `PolicyEngine` and `ConsentGate`; the A5 task
+transitions (`recovering` → `failed` on recovery, and the compensation's own
+`failed`); `SanitizingRecoveryEngine`'s audit row, its `onAudit` sink and the
+`RECOVERY_NEEDS_REVIEW` code it returns; `SafetyCenterScreen` and every field of
+the row 22ed024 renders; the A12 critic's rung scores and what
+`ExecutionSignal.gateGranted` means; `NativeGestureExecutor`'s approval handling
+and bounds resolution; `RuntimeResult.result`, `reflection` and
+`reflectionEvent`. No signature changed, so there was no implementer or caller
+to chase: `blocked` takes an optional named argument, every construction site is
+unchanged, and the only implementer of `ExecutionSignal` in the app already had
+the getter. The `_recordedFailureCode` rung in the critic is left reading
+`platformCode` on purpose — it scores *what the platform said*, which is not the
+question `_undoResult` asks.
+
+**Two honest limits, recorded rather than smoothed over.** First, a scheduled
+automation that fails (`lib/core/automation_wiring.dart`) still reports
+`describeAutomationError(result.result)`, so a job's `lastError` will still say
+`RECOVERY_NEEDS_REVIEW` where the undo toast now says the specific code. That is
+the D15 toast the task names and nothing more; the field is on the result and
+one line of that file would read it, but changing what a job's stored error says
+is a different surface and is not claimed here. Second, the reason is reported
+only when a signal carries one, so a recovery run entered for a reason that is
+not an executor failure still falls back to the blanket code — by design, and
+asserted rather than assumed.
+
+**Standing gap, unchanged and not closable on this host:** no device or emulator
+run. Java and the Android SDK are both absent here, so nothing in this entry was
+observed on hardware. It is verified by tests against the real composition root,
+the real `PolicyEngine`, the real `ConsentGate`, the real `NativeGestureExecutor`,
+the real `NativeBridge` and the real `SanitizingRecoveryEngine` with a mocked
+platform channel — never by a person reading a toast on a phone. No claim is
+made here that one exists.

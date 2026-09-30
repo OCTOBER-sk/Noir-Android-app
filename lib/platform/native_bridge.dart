@@ -218,6 +218,13 @@ class NativeGestureOutcome implements ExecutionReport, ExecutionSignal {
 
   /// Block reason: the PolicyEngine message when there is one, otherwise the
   /// platform error code, otherwise a generic fail-closed identifier.
+  ///
+  /// This is the app's [ExecutionSignal.blockReason] — the reason a run did not
+  /// happen, in the words of the stage that stopped it. It is never null, which
+  /// is what lets a run that was dispatched and not confirmed still be
+  /// diagnosable: the fail-closed identifier is an answer, and silence would not
+  /// be one.
+  @override
   String get blockReason {
     if (verdict.allowed) return kCodeNativeDispatchFailed;
     final code = platformCode;

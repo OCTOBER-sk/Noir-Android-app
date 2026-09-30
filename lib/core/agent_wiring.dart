@@ -606,6 +606,12 @@ class NativeGestureExecutor implements Executor {
 /// is produced by the real `executeReflectionRecovery` and handed to [onAudit],
 /// and the user starts a fresh run, which goes through classification, the gate
 /// and confirmation again from the top.
+///
+/// What the executor said went wrong travels out with that result, on
+/// [RuntimeResult.failureReason], so a caller that has to report the failure can
+/// report the specific one. It is deliberately not folded into the block code:
+/// the code means "this run needs review" and the Safety Center's row says
+/// exactly that today, and it is still going to say it.
 class SanitizingRecoveryEngine extends RecoveryEngine {
   SanitizingRecoveryEngine({required TaskController tasks, this.onAudit})
     : _tasks = tasks;
@@ -651,7 +657,23 @@ class SanitizingRecoveryEngine extends RecoveryEngine {
     onAudit?.call(audit);
     _tasks.transitionTo(TaskState.recovering);
     _tasks.transitionTo(TaskState.failed);
-    return RuntimeResult.blocked(GateResult.blocked('RECOVERY_NEEDS_REVIEW'));
+    return RuntimeResult.blocked(
+      GateResult.blocked('RECOVERY_NEEDS_REVIEW'),
+      // Why the run did not complete, when the executor's own answer names a
+      // reason — read off that answer through the interface, the same way the
+      // A12 critic scored it, and never off a rendering of it.
+      //
+      // It is carried beside the block code, not written into it. The Safety
+      // Center's row is built from the audit entry above and its
+      // `RECOVERY_NEEDS_REVIEW` meaning is unchanged; what this adds is a second
+      // reading of the same run for the callers that have to say what actually
+      // went wrong — the D15 undo toast being the one that exists today.
+      //
+      // `null` is a real answer and not a gap: a recovery run can be entered for
+      // something other than an executor failure, and in that case the code above
+      // is the whole truth.
+      failureReason: reportedBlockReason(executed),
+    );
   }
 }
 

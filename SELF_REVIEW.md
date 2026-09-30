@@ -878,6 +878,77 @@ that one exists. This is the one thing a green CI badge does not cover.
 
 ---
 
+## 2026-09-30 ~04:30 UTC — NOT idle: the D15 Undo control is now real
+
+The five idle heartbeats above are closed. This run dispatched work and
+integrated it.
+
+**The gap, found by reading the code rather than the logs:**
+`UndoToast` (`lib/ui/command_centre_screen.dart`) rendered `_UndoActionButton`
+as a hard-coded disabled box with the literal caption "Disabled: undo is not
+wired to an action executor yet." Meanwhile `CountdownUndoWindow.cancel()`
+(`lib/core/agent_wiring.dart:403`) already existed and its only caller was
+`composition_root.dispose()`. A6b was half-delivered: the runtime could cancel a
+window and no press could reach the executor that ran the action.
+
+A second defect in the same path: `CountdownUndoWindow.open()` published
+`reversible: outcome == UndoOutcome.cancelled` — the action was announced as
+reversible only *after* the user had already cancelled it, and irreversible when
+the window merely ran out of time. The flag described the ending, not the action.
+
+**Delivered** (`ecb07d5`, merged `77cdf83`, formatted `485d17f`, all pushed to
+`main`):
+
+- `UndoableAction` records the plan, risk, executor and outcome of the action
+  that ran; `Compensation` names the inverse as data (a verb plus the text to
+  aim at), never a node or a gesture.
+- `kActionCompensations` holds exactly one entry, `navigate -> navigate_back`.
+  A tap cannot be untapped, so every other verb is irreversible by construction
+  and is offered no control rather than a control that could not fire.
+- The window now publishes when it **opens**, holds a `LiveUndoWindow` that is
+  the only thing a press may act on, and clears it when it closes — which is
+  what makes a second press a no-op.
+- `NoirComposition.undo(actionId)` is the control's whole implementation: it
+  answers against the live window alone, refuses with a reason when there is
+  nothing to reverse, and runs the compensation through `runAutomation`, so it
+  is planned against the live screen, scored by the same `RiskClassifier`, vetted
+  by the same `PolicyEngine` and confirmed by a human through the same
+  `ConsentGate`. The original approval is not reused; it was single-use.
+- `UndoToast` takes the executor by injection, like `onAnswerConfirmation`. It
+  is live when a handler is connected, honest when one is not, and never
+  substitutes a local one.
+
+**Evidence, all measured this run:**
+- `flutter analyze` on the merged tree: `No issues found!`
+- `flutter test` on the merged tree: `1001 passed`, 0 failed.
+- CI run **36668899515** on `485d17f`: `success`, 5m09s.
+- `grep TODO|FIXME|UnimplementedError` over `lib/`: 0 hits. The only surviving
+  mention of the old caption is a doc comment explaining what replaced it.
+
+**One thing worth recording about the process.** The first merge (36668675428)
+failed, and it was the worker's fault, not a flake: the `dart format` gate added
+in 70c4b7f was never run over its own output. Six files were non-conformant.
+Fixed in 485d17f, formatting only, 1001 tests unchanged. The lesson for every
+future dispatch: **the format gate is part of "done"**, and a worker that reports
+`analyze` clean has not met the bar.
+
+A second process note: the worker's own composition tests were initially
+failing for a reason that had nothing to do with the production code — the test
+fixture asked for `input: 'maps'` against a dump whose nodes read "Send message"
+and "Back", so the executor correctly refused to dispatch a gesture to a node that
+was not there, and the test then blamed the feature. The production path was
+verified correct against the real bridge before the fixture was corrected. Worth
+remembering that a failing new test is evidence about the test until proven
+otherwise.
+
+**Standing gap, unchanged and not closable on this host:** no device or emulator
+run. The undo path is verified by widget tests plus an end-to-end test against
+the real `NativeBridge`, the real `PolicyEngine` and the real `ConsentGate` with
+a mocked platform channel — never by an observed press on hardware. No claim is
+made here that one exists.
+
+---
+
 ## Heartbeat 2026-09-29 ~15:xx UTC — idle; fifth consecutive no-op run
 
 Measured this run, nothing inherited:

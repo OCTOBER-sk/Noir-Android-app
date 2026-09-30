@@ -1894,3 +1894,47 @@ the 0.20 rung unit-covered only; the overlapping audit row in
 **Standing gap, unchanged:** no device or emulator run; Java and the Android SDK are absent on this host, so the Dart/Kotlin `PlatformException` correspondence is asserted from source only.
 
 **Next action:** nothing until new work is dispatched. The carried-forward design questions (gate refusals never reaching recovery; the 0.20 rung unit-covered only; the overlapping audit row in `composition_root_test.dart`) remain open by choice.
+
+---
+
+## Heartbeat 2026-09-30 14:5x
+
+**State.** `main` at `bcf437c`, level with `origin/main` after `git fetch` (both
+`bcf437c7ac695f9608d8673d202e8c075d607523`), working tree clean before and
+after the gates, no stashes, `git branch --no-merged main` empty.
+`git worktree list` shows only the main checkout — the `/tmp/noir-wt-*`
+worktree directories do not exist; the six `/tmp/noir-wt-*.log` files are stale
+artifacts (newest mtime `2026-09-30 12:12`, `recovery-e2e`). `ps` matched no
+`opencode`, `claude`, `codex`, `flutter`, `dart` or `gradle` process. No worker
+in flight, nothing to integrate.
+
+**Re-verified on `main` at `bcf437c`**, run by the supervisor in the main
+checkout:
+
+- `flutter analyze` — `No issues found!` (1.1s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1041** (1m44s).
+
+`git diff --stat f45fbb0 HEAD` is `SELF_REVIEW.md` only, so the Dart surface
+measured above is identical to the 14:32 verification.
+
+**CI.** Latest run remains **36713571920** on `70801a8` (`success`, 3m54s). The
+doc-only commits since it have no CI run of their own.
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost
+incurred. `opencode/space-bunny-free` remains the only permitted route; no paid
+model and no OpenRouter fallback.
+
+**Standing gap, unchanged:** no device or emulator run; Java and the Android SDK
+are absent on this host, so the Dart/Kotlin `PlatformException` correspondence is
+asserted from source only.
+
+**Next action:** nothing until new work is dispatched. The carried-forward design
+questions (gate refusals never reaching recovery; the 0.20 rung unit-covered
+only; the overlapping audit row in `composition_root_test.dart`) remain open by
+choice.
+
+**Observation for the user:** this file is now ~1900 lines and the last four
+entries are byte-for-byte the same shape (idle main, 1041 tests, same CI run,
+same standing gap). Recording another one adds noise rather than signal. Consider
+gating these entries on actual change — a dirty tree, a new CI run, or a
+non-zero diff from the last recorded SHA — and staying silent otherwise.

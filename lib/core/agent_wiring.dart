@@ -603,17 +603,31 @@ class NativeGestureExecutor implements Executor {
 /// A low-confidence reflection is not retried here. Retrying would either skip
 /// the gate — which C2 forbids and this class will not do — or re-enter it
 /// invisibly. Instead the run ends as `RECOVERY_NEEDS_REVIEW`: the audit entry
-/// is produced by the real `executeReflectionRecovery`, and the user starts a
-/// fresh run, which goes through classification, the gate and confirmation
-/// again from the top.
+/// is produced by the real `executeReflectionRecovery` and handed to [onAudit],
+/// and the user starts a fresh run, which goes through classification, the gate
+/// and confirmation again from the top.
 class SanitizingRecoveryEngine extends RecoveryEngine {
-  SanitizingRecoveryEngine({required TaskController tasks}) : _tasks = tasks;
+  SanitizingRecoveryEngine({required TaskController tasks, this.onAudit})
+    : _tasks = tasks;
 
   final TaskController _tasks;
 
-  /// Audit entries this engine has produced, oldest first. [executeReflectionRecovery]
-  /// in `lib/agent/recovery_engine.dart` builds and discards one; the record is
-  /// kept here so the outcome is inspectable rather than a claim in a comment.
+  /// Where the A4 audit entry is announced, when something is listening.
+  ///
+  /// The composition root injects its own safety log, which is the same
+  /// `Stream<SafetyEventState>` every other decision reaches the Safety Center
+  /// through — so a run that ends `RECOVERY_NEEDS_REVIEW` shows up there with
+  /// its task id, its confidence and the path that was chosen, instead of being
+  /// a record only this object holds.
+  ///
+  /// Null is honest and silent: the entry is still built and still kept in
+  /// [auditTrail], it simply has nowhere to go. A local fallback sink is never
+  /// installed, because a log nobody can read is a claim, not a record.
+  final void Function(recovery.RecoveryAudit audit)? onAudit;
+
+  /// Audit entries this engine has produced, oldest first, in the wire shape
+  /// `lib/agent/recovery_engine.dart` has always produced. One entry per recovery
+  /// run, from the same [recovery.RecoveryAudit] that [onAudit] is handed.
   final List<Map<String, dynamic>> auditTrail = <Map<String, dynamic>>[];
 
   @override
@@ -625,13 +639,16 @@ class SanitizingRecoveryEngine extends RecoveryEngine {
       _tasks.taskId,
       (reflection.confidence * 100).round(),
     );
-    recovery.executeReflectionRecovery(
+    // The one record for this run. It is neither rebuilt nor invented downstream:
+    // the map below and the event the Safety Center shows are two views of it.
+    final recovery.RecoveryAudit audit = recovery.executeReflectionRecovery(
       plan,
       // Sanitized text only. The raw dump is never handed to the recovery path,
       // so a hidden node cannot steer a retry.
       sanitizedScreen: const <String>[],
     );
-    auditTrail.add(plan.auditLog());
+    auditTrail.add(audit.toMap());
+    onAudit?.call(audit);
     _tasks.transitionTo(TaskState.recovering);
     _tasks.transitionTo(TaskState.failed);
     return RuntimeResult.blocked(GateResult.blocked('RECOVERY_NEEDS_REVIEW'));

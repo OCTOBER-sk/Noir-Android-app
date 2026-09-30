@@ -981,3 +981,81 @@ channel plus CI, never by an observed gesture on hardware.
 about there being nothing to do. This entry is the fifth. Recording idle runs
 is no longer producing new information; the next useful run should either
 dispatch real work or report only on a state change.
+
+---
+
+## 2026-09-30 — NOT idle: the A4 recovery audit trail is now readable
+
+**The gap, found by reading the code rather than the logs.**
+`SanitizingRecoveryEngine.executeReflectionRecovery` built a real audit entry
+(`lib/agent/recovery_engine.dart`) and appended it to its own `auditTrail`. A
+repo-wide grep found two hits for `auditTrail`, both inside that one class: the
+declaration and the `add`. No test, no UI and no other lib file ever read it. The
+comment above the call said so — "not yet forwarded anywhere: the Safety Center
+(D9) event bus does not exist yet" — and D9 has existed for a while.
+
+Two more facts turned up while closing it, and both were bigger than the audit
+entry:
+
+1. **The Safety Center was never given the log at all.**
+   `CommandCentreScreen._openSafetyCenter` built `SafetyCenterScreen` with a
+   bridge and an MCP wiring but no `log`, so the screen said "No safety log is
+   connected." while the graph recorded every blocked gesture, every sanitized
+   dump and every confirmation into `composition.safetyEvents()`. `main.dart` now
+   hands that stream down, so the log a user reads is the graph's own.
+2. **The log could not have been replayed even if it had been wired.**
+   `safetyEvents()` published into a `StreamController.broadcast` *synchronously*
+   and then returned `.stream` — so the one event that carried the current state
+   was added before the caller could subscribe, and a broadcast controller drops
+   it. A screen that subscribed a second later got nothing and waited on
+   "Reading the safety log…" forever. `safetyEvents()` now returns a per-listener
+   feed that queues the log as it stands on attach and then forwards changes, and
+   an empty log is published as an empty `SafetyEventAvailable` rather than as
+   `SafetyEventLoading` — "connected and empty" is a fact, "still reading" is not.
+
+**Delivered:**
+
+- `RecoveryAudit` (`lib/agent/recovery_engine.dart`) is the typed record: task id,
+  confidence, chosen path, whether sanitized content was used, and the moment —
+  all read off the recovery that produced them. `auditLog()` still returns the
+  same wire-shaped map and `SanitizingRecoveryEngine.auditTrail` is kept; both are
+  now two views of one record, so a row cannot carry a different score or a
+  different moment than the trail.
+- `executeReflectionRecovery` returns the record instead of discarding it, and
+  `SanitizingRecoveryEngine` takes an `onAudit` sink. Null is honest and silent —
+  no local fallback sink is invented.
+- The composition root injects `_logRecovery`, which writes the same
+  `SafetyEventKind.recovery` / `blocked` row every other decision goes through.
+  The badge is derived from the existing enum, so no colour and no widget was
+  added; the row reuses the badge and label the safety log already renders.
+- Display-only: no gate, no task transition and no pipeline behaviour changed,
+  and the new test asserts the run still ends `RECOVERY_NEEDS_REVIEW` with the
+  task in `failed`.
+
+**Evidence, all measured on this branch:**
+
+- `flutter analyze`: `No issues found!`
+- `flutter test`: `+1005: All tests passed!` (1001 before this branch, +4 new)
+- `dart format --output=none --set-exit-if-changed lib test` — the gate CI runs:
+  `Formatted 144 files (0 changed)`, exit 0.
+- The new tests have teeth, checked rather than assumed: deleting the one line
+  that injects `onAudit` fails both recovery tests and leaves the two empty-state
+  tests green.
+
+**One honest limit, recorded because it is not this branch's to fix.**
+`AgentRuntimePipeline` only calls `executeReflectionRecovery` when
+`ReflectionCritic.computeConfidence` scores below 0.5, and that function can only
+get there for an execution outcome that is null or whose `toString()` contains
+"failed"/"error". The shipped `NativeGestureExecutor` always returns a
+`NativeGestureOutcome`, which has the default `toString` — so with the current
+critic the recovery branch is not reachable from `runAutomation`. The new test
+drives the graph's own engine directly and says so in its header rather than
+faking a pipeline run that cannot happen. Closing that second gap means changing
+`ReflectionCritic`, which is a behaviour change to the runtime, not display
+plumbing.
+
+**Standing gap, unchanged and not closable on this host:** no device or emulator
+run. This is verified by tests against the real composition root, the real
+`PolicyEngine` and the real `SafetyCenterScreen` with a mocked platform channel —
+never by a person opening the screen on hardware. No claim is made here that one
+exists.

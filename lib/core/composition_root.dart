@@ -50,6 +50,7 @@ import 'package:flutter/foundation.dart';
 
 import '../agent/agent_runtime.dart';
 import '../agent/cost_estimator.dart';
+import '../agent/recovery_engine.dart' show RecoveryAudit;
 import '../automations/automations.dart';
 import '../data/data.dart';
 import '../data/memory_store_bridge.dart';
@@ -873,6 +874,13 @@ class NoirComposition extends ChangeNotifier {
     );
 
     // --- safety stack and the A6 pipeline --------------------------------
+    // The graph itself is declared here rather than beside the automation wiring
+    // below, because the collaborators built in this section report through it:
+    // the A4 recovery engine is built before the graph exists and reports to the
+    // safety log once it does, the same way `reportTurn` does further down. No
+    // run can start before [open] returns, so no closure here is ever called
+    // against an unassigned graph.
+    late final NoirComposition composition;
     final NoirTaskRun taskRun = NoirTaskRun();
     final ConsentGate gate = ConsentGate(timeout: consentTimeout);
     final CountdownUndoWindow undoWindow = CountdownUndoWindow(
@@ -890,6 +898,11 @@ class NoirComposition extends ChangeNotifier {
     final ReflectionCritic critic = ReflectionCriticImpl();
     final SanitizingRecoveryEngine recovery = SanitizingRecoveryEngine(
       tasks: taskRun.controller,
+      // A4's audit entry goes into the same log every other decision goes into,
+      // through the same seam, so the Safety Center can show a run that ended
+      // `RECOVERY_NEEDS_REVIEW` instead of the graph knowing about a degraded run
+      // and the user never being told.
+      onAudit: (RecoveryAudit audit) => composition._logRecovery(audit),
     );
     final AgentRuntimePipeline pipeline = AgentRuntimePipeline(
       planner: planner,
@@ -908,7 +921,9 @@ class NoirComposition extends ChangeNotifier {
     step(
       kSafetyPipelineStartupSubsystem,
       ok: true,
-      detail: 'planner, gate, undo window, executor, critic, recovery',
+      detail:
+          'planner, gate, undo window, executor, critic, recovery on the '
+          'safety log',
     );
 
     // --- MCP -------------------------------------------------------------
@@ -950,7 +965,6 @@ class NoirComposition extends ChangeNotifier {
     //     the platform. It is late-bound for the same reason [reportTurn] is: a
     //     job cannot be dispatched before [open] has returned, by which time the
     //     graph exists.
-    late final NoirComposition composition;
     final PolicyEngineAutomationGate automationGate =
         PolicyEngineAutomationGate(
           policy: policy,
@@ -1610,12 +1624,13 @@ class NoirComposition extends ChangeNotifier {
   /// reason rather than left looking like a night when nothing happened.
   ///
   /// Stated plainly, because the alternative is a comment that implies more than
-  /// this build can do: the Safety Center is constructed without this log — see
-  /// `SafetyCenterScreen` at lib/ui/command_centre_screen.dart:418 — so today it
-  /// is a record the graph keeps and [safetyEvents] publishes, not a line the
-  /// user reads on a screen. What the user can see is the job's own `lastError`
-  /// in the Skill Manager, and, when there is no store at all, the startup fault
-  /// on the splash.
+  /// this build can do: a pass that failed, or one with no scheduler to run with,
+  /// reaches the user as a row in the Safety Center's safety log — `main.dart`
+  /// hands the screen this graph's [safetyEvents] stream — and a run the gate
+  /// denied or a user refused says so on the job the Skill Manager lists. The
+  /// screen's own retry control is not drawn, because there is nothing here that
+  /// can be retried: a pass either ran or it did not, and the runs it produced
+  /// are durable records rather than a cached list this graph can reload.
   void _onSchedulerPass(AutomationPass pass) {
     switch (pass) {
       case AutomationPassFailed(:final String reason):
@@ -1767,20 +1782,58 @@ class NoirComposition extends ChangeNotifier {
   }
 
   /// The safety decisions this graph has actually made, oldest first.
+  ///
+  /// Every listener is given the log as it stands when *it* subscribes, and then
+  /// every change after that. The replay is not decoration: the Safety Center
+  /// takes this stream when a user opens it, which is long after the run that
+  /// produced the rows, so a stream that only carried changes would show a
+  /// screen with nothing on it. The previous shape published into a broadcast
+  /// controller *before* the caller could subscribe, so the one event that would
+  /// have told the screen what had happened was dropped on the floor.
   Stream<SafetyEventState> safetyEvents() {
     if (_disposed) return const Stream<SafetyEventState>.empty();
-    unawaited(_publishSafety());
-    return _safetyEvents.stream;
+    return _safetyFeed();
   }
 
-  Future<void> _publishSafety() async {
-    if (_disposed || _safetyEvents.isClosed) return;
-    _safetyEvents.add(
-      _safetyLog.isEmpty
-          ? const SafetyEventLoading()
-          : SafetyEventAvailable(List<SafetyEvent>.unmodifiable(_safetyLog)),
+  /// One listener, one feed: the log as it stands, then the changes.
+  Stream<SafetyEventState> _safetyFeed() {
+    late final StreamController<SafetyEventState> feed;
+    StreamSubscription<SafetyEventState>? changes;
+    feed = StreamController<SafetyEventState>(
+      onListen: () {
+        // The replay is queued before the bus is subscribed, so a decision made
+        // while this listener was attaching is delivered *after* the snapshot
+        // rather than lost. Ordering is the whole contract here: the rows a user
+        // reads have to be oldest first.
+        feed.add(_safetySnapshot());
+        changes = _safetyEvents.stream.listen(
+          feed.add,
+          onError: feed.addError,
+          // The bus closes when the graph is disposed; the feed closes with it,
+          // so a screen still listening learns the graph is gone instead of
+          // waiting for a decision that can never be made.
+          onDone: feed.close,
+        );
+      },
+      onCancel: () async {
+        final StreamSubscription<SafetyEventState>? live = changes;
+        changes = null;
+        await live?.cancel();
+      },
     );
+    return feed.stream;
   }
+
+  /// The log as it stands, as one state.
+  ///
+  /// An empty log is an empty [SafetyEventAvailable], never
+  /// [SafetyEventLoading]: the log is connected and it holds nothing, and those
+  /// are different facts. Publishing the loading state until something is
+  /// recorded would leave the Safety Center reading "still reading" for a process
+  /// that had read everything and decided nothing — the one thing a safety screen
+  /// is least allowed to be unsure about.
+  SafetyEventState _safetySnapshot() =>
+      SafetyEventAvailable(List<SafetyEvent>.unmodifiable(_safetyLog));
 
   /// Forwards one of the bridge's log lines into the safety log.
   ///
@@ -1799,11 +1852,39 @@ class NoirComposition extends ChangeNotifier {
     );
   }
 
+  /// Records the A4 outcome the recovery engine built.
+  ///
+  /// Every field here is read off [audit], which the real
+  /// `SanitizingRecoveryEngine` produced from the reflection that scored below
+  /// the threshold: the task id the A5 controller was built with, the confidence
+  /// that triggered recovery, the path that was chosen and whether it ran on
+  /// sanitized content. Nothing is filled in on its behalf — in particular the
+  /// moment is the audit's own, not a second reading of the clock, so the row
+  /// cannot claim a time the recovery did not record.
+  ///
+  /// The outcome is `blocked` because that is what the run is: the engine ends it
+  /// as `RECOVERY_NEEDS_REVIEW` and dispatches nothing, so a new run is what the
+  /// user has to start. This is a log line and nothing more — the gate, the task
+  /// states and the pipeline are untouched by it.
+  void _logRecovery(RecoveryAudit audit) {
+    _logSafety(
+      summary: 'Low-confidence reflection needs review',
+      kind: SafetyEventKind.recovery,
+      outcome: SafetyEventOutcome.blocked,
+      detail:
+          'task ${audit.taskId}, confidence ${audit.confidenceScore}/100, '
+          'path ${audit.recoveryPath}, sanitized screen used: '
+          '${audit.sanitizedScreenUsed}',
+      occurredAt: audit.timestamp,
+    );
+  }
+
   void _logSafety({
     required String summary,
     required SafetyEventKind kind,
     required SafetyEventOutcome outcome,
     String? detail,
+    DateTime? occurredAt,
   }) {
     if (_disposed) return;
     _safetySequence++;
@@ -1814,7 +1895,10 @@ class NoirComposition extends ChangeNotifier {
         kind: kind,
         outcome: outcome,
         detail: detail,
-        occurredAt: clock.now(),
+        // The graph's clock, unless the event carries a moment of its own — a
+        // recovery record already knows when the critic scored it, and a second
+        // reading of the clock would be a different fact wearing the same row.
+        occurredAt: occurredAt ?? clock.now(),
       ),
     );
     if (!_safetyEvents.isClosed) {

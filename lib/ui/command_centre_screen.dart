@@ -75,6 +75,7 @@ class CommandCentreScreen extends StatefulWidget {
     this.operations,
     this.mcp,
     this.events,
+    this.safetyEvents,
     this.confirmations,
     this.onAnswerConfirmation,
     this.onUndoAction,
@@ -123,6 +124,22 @@ class CommandCentreScreen extends StatefulWidget {
   /// Null means no event source is connected, and the screen says so through the
   /// states it already has rather than pretending to be live.
   final Stream<NoirUiEvent>? events;
+
+  /// The safety decisions this app's graph has actually made, handed straight to
+  /// the Safety Center.
+  ///
+  /// This is `composition.safetyEvents()` in production — the same stream the
+  /// graph writes every blocked gesture, sanitized dump, confirmation and A4
+  /// recovery record into. The screen opens the Safety Center and used to build
+  /// it with a bridge and an MCP wiring but no log, so the graph could record a
+  /// decision and the screen still said "No safety log is connected." Passing the
+  /// graph's own stream is what makes the safety log a screen a user can read
+  /// rather than a list held inside one object.
+  ///
+  /// Null means no source is connected, and the Safety Center says so instead of
+  /// listing decisions that were never made. A local source is never substituted:
+  /// a safety log nobody's decisions reached would be decoration.
+  final Stream<SafetyEventState>? safetyEvents;
 
   /// The policy gate's live confirmation requests — the same
   /// `composition.confirmations` stream `OperationsSheet` is already given, and
@@ -574,12 +591,17 @@ class _CommandCentreScreenState extends State<CommandCentreScreen>
 
   /// Opens the Safety Center, which is where the real accessibility status and
   /// the real A6a screen audit live. The same bridge instance is handed over so
-  /// the two screens never disagree about what the service is doing.
+  /// the two screens never disagree about what the service is doing, and so is
+  /// the graph's own safety log, so the rows the user reads there are the
+  /// decisions this process really made.
   void _openSafetyCenter() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            SafetyCenterScreen(bridge: widget.bridge, mcp: widget.mcp),
+        builder: (_) => SafetyCenterScreen(
+          bridge: widget.bridge,
+          mcp: widget.mcp,
+          log: widget.safetyEvents,
+        ),
       ),
     );
   }

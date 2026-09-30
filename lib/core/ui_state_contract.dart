@@ -56,14 +56,21 @@ class CostEstimateResolved extends NoirUiEvent {
 }
 
 // Undo Window (A6b / D15)
+//
+// `actionId` is the handle the UI hands back when the user presses Undo: it is
+// the id of the window that is counting down right now, and it is what
+// `NoirComposition.undo` looks the live action up by. Without it the control
+// could only be drawn, never pressed.
 class ActionCompletedWithUndoWindow extends NoirUiEvent {
   final String actionDescription;
   final bool reversible;
   final Duration window;
-  ActionCompletedWithUndoWindow(
+  final String actionId;
+  const ActionCompletedWithUndoWindow(
     this.actionDescription,
     this.reversible,
     this.window,
+    this.actionId,
   );
 }
 

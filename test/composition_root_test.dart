@@ -112,6 +112,29 @@ List<Map<String, dynamic>> _dump() => <Map<String, dynamic>>[
   },
 ];
 
+/// A screen dump that also holds the back affordance a navigation's undo aims
+/// at, so the compensating run resolves against a node that is really there.
+///
+/// The second node in [_dump] is zero-alpha and would be stripped by A6a, which
+/// is why this dump adds a visible one rather than reusing it: an undo that
+/// resolved against content the sanitizer removed would be an undo of a node
+/// the app had already decided not to act on.
+List<Map<String, dynamic>> _undoDump() => <Map<String, dynamic>>[
+  ..._dump(),
+  <String, dynamic>{
+    'text': 'Back',
+    'alpha': 1.0,
+    'zOrder': 1,
+    'visible': true,
+    'screenBounds': <String, dynamic>{
+      'left': 0,
+      'top': 0,
+      'right': 48,
+      'bottom': 48,
+    },
+  },
+];
+
 void main() {
   // The composition root builds a NativeBridge, which registers a method-call
   // handler on a real MethodChannel, so the binding has to exist before the
@@ -760,6 +783,271 @@ void main() {
         expect(platform.methods, isNot(contains(kMethodDispatchGesture)));
       },
     );
+  });
+
+  group('the undo window is a real control, not a picture of one', () {
+    // `UndoToast` used to render a permanently disabled button captioned
+    // "Disabled: undo is not wired to an action executor yet." The runtime
+    // could cancel a window all along, but nothing could reach the executor
+    // that ran the action, and `CountdownUndoWindow` published its event from
+    // the window's *ending*, so the toast appeared after the countdown it
+    // belonged to was over and its `reversible` flag described the ending
+    // rather than the action.
+    //
+    // What is asserted here, against the real bridge, the real PolicyEngine and
+    // the real ConsentGate:
+    //
+    //   * a navigation the user confirmed is announced while its window is still
+    //     open, as reversible, and pressing Undo dispatches one compensating
+    //     gesture — once, and only after a fresh confirmation;
+    //   * an action this build cannot reverse is announced as irreversible, so
+    //     the control is not offered and the press is refused with a reason;
+    //   * nothing about the compensation is decided here: the screen has to
+    //     change for the compensation to have anything to aim at.
+    late NativeBridge bridge;
+
+    setUp(() {
+      platform.install(<String, Future<Object?> Function(MethodCall call)>{
+        kMethodServiceStatus: (MethodCall call) async =>
+            _connectedStatus(nodeCount: _undoDump().length),
+        kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
+          'nodes': _undoDump(),
+          'nodeCount': _undoDump().length,
+        },
+        kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
+          'allowed': true,
+          'message': 'ok',
+        },
+        kMethodDispatchGesture: (MethodCall call) async => <String, dynamic>{
+          'executed': true,
+        },
+      });
+      bridge = NativeBridge();
+    });
+
+    tearDown(() async {
+      await bridge.dispose();
+    });
+
+    /// Every gesture the platform was actually asked to dispatch.
+    List<MethodCall> dispatches() => platform.received
+        .where((MethodCall call) => call.method == kMethodDispatchGesture)
+        .toList();
+
+    /// Records what the graph announces.
+    ///
+    /// It deliberately does NOT end the countdown. The window now publishes
+    /// when it opens and stays live until the user presses Undo or the clock
+    /// runs out, so a helper that cancelled on the announcement would destroy
+    /// the very record the press is supposed to act on. Tests that never press
+    /// call [settle] to close the window instead.
+    List<ActionCompletedWithUndoWindow> announcements(NoirComposition app) {
+      final List<ActionCompletedWithUndoWindow> announced =
+          <ActionCompletedWithUndoWindow>[];
+      final StreamSubscription<NoirUiEvent> subscription = app.taskRun.events
+          .listen((NoirUiEvent event) {
+            if (event is! ActionCompletedWithUndoWindow) return;
+            announced.add(event);
+          });
+      addTearDown(subscription.cancel);
+      return announced;
+    }
+
+    /// Starts [request] and answers its gate, without waiting for the run.
+    ///
+    /// The run does not finish until its undo window ends, so a helper that
+    /// awaited it would deadlock against the press the test has not made yet.
+    /// The returned future is the run itself; [settle] or a press ends it.
+    Future<Future<RuntimeResult?>> launch(
+      NoirComposition app,
+      AutomationRequest request,
+    ) async {
+      final Future<RuntimeResult?> run = app.runAutomation(request);
+      final PendingConfirmation confirmation = await app.confirmations.first;
+      expect(confirmation.action, request.action);
+      confirmation.answer(true);
+      return run;
+    }
+
+    test('a confirmed navigation can be undone once, through the gate', () async {
+      final NoirComposition app = await open(bridge: bridge);
+      addTearDown(app.dispose);
+      final List<ActionCompletedWithUndoWindow> announced = announcements(app);
+
+      final Future<RuntimeResult?> run = await launch(
+        app,
+        const AutomationRequest(action: 'navigate', input: 'Send message'),
+      );
+      while (announced.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(dispatches(), hasLength(1));
+
+      expect(
+        announced,
+        hasLength(1),
+        reason: 'the completed action announced its window once',
+      );
+      final ActionCompletedWithUndoWindow window = announced.single;
+      expect(
+        window.reversible,
+        isTrue,
+        reason: 'a navigation has an inverse this build can dispatch',
+      );
+      expect(window.actionDescription, contains('navigate'));
+      expect(window.actionId, isNotEmpty);
+
+      // The press itself. It is a new gated action, so the gate is asked again
+      // rather than the original approval being reused: that approval was
+      // single-use and covered one dispatch.
+      final Future<UndoResult> undo = app.undo(window.actionId);
+      final PendingConfirmation compensating = await app.confirmations.first;
+      expect(compensating.action, 'navigate_back');
+      compensating.answer(true);
+
+      expect(await undo, isA<UndoPerformed>());
+      expect((await run)!.blocked, isFalse);
+      final List<MethodCall> sent = dispatches();
+      expect(sent, hasLength(2), reason: 'the action and its compensation');
+      final Map<Object?, Object?> payload =
+          sent.last.arguments as Map<Object?, Object?>;
+      expect(
+        (payload['proposal'] as Map<Object?, Object?>)['action'],
+        'navigate_back',
+      );
+      expect(payload['confirmed'], isTrue);
+      expect(app.gate.approvedActions, isEmpty);
+
+      // The compensation announced its own window, and it is not reversible:
+      // this build names no inverse for going back, so there is no undo of the
+      // undo to offer.
+      expect(announced, hasLength(2));
+      expect(announced.last.reversible, isFalse);
+    });
+
+    test('a second press on the same action does nothing', () async {
+      final NoirComposition app = await open(bridge: bridge);
+      addTearDown(app.dispose);
+      final List<ActionCompletedWithUndoWindow> announced = announcements(app);
+
+      final Future<RuntimeResult?> run = await launch(
+        app,
+        const AutomationRequest(action: 'navigate', input: 'Send message'),
+      );
+      while (announced.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final ActionCompletedWithUndoWindow window = announced.single;
+      final Future<UndoResult> undo = app.undo(window.actionId);
+      (await app.confirmations.first).answer(true);
+      expect(await undo, isA<UndoPerformed>());
+      await run;
+
+      final UndoResult again = await app.undo(window.actionId);
+
+      expect(again, isA<UndoRefused>());
+      expect((again as UndoRefused).reason, kUndoNoLiveWindow);
+      expect(
+        dispatches(),
+        hasLength(2),
+        reason: 'the spent window holds nothing to compensate',
+      );
+    });
+
+    test('an action with no inverse is offered no undo at all', () async {
+      final NoirComposition app = await open(bridge: bridge);
+      addTearDown(app.dispose);
+      final List<ActionCompletedWithUndoWindow> announced = announcements(app);
+
+      // `read_screen` is STANDARD, so it does get a window — a tap cannot be
+      // untapped, so that window is announced as irreversible.
+      // The press happens while the window is still live, which is the point:
+      // a window this build cannot reverse is refused for that reason, not
+      // because its clock happened to run out first.
+      final Future<RuntimeResult?> run = await launch(
+        app,
+        const AutomationRequest(action: 'read_screen', input: 'Send message'),
+      );
+      while (announced.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(announced.single.reversible, isFalse);
+
+      final UndoResult refused = await app.undo(announced.single.actionId);
+      expect((await run)!.blocked, isFalse);
+
+      expect(refused, isA<UndoRefused>());
+      expect((refused as UndoRefused).reason, kUndoNotCompensatable);
+      expect(dispatches(), hasLength(1), reason: 'nothing was compensated');
+    });
+
+    test('an undo nobody confirms dispatches nothing', () async {
+      final NoirComposition app = await open(
+        bridge: bridge,
+        // Short enough that the unanswered request expires inside the test.
+        consentTimeout: const Duration(milliseconds: 120),
+      );
+      addTearDown(app.dispose);
+      final List<ActionCompletedWithUndoWindow> announced = announcements(app);
+
+      final Future<RuntimeResult?> run = await launch(
+        app,
+        const AutomationRequest(action: 'navigate', input: 'Send message'),
+      );
+      while (announced.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      // The press, and no answer: the compensating run waits out the gate's own
+      // bound and is refused, because silence is not consent.
+      final Future<UndoResult> refused = app.undo(
+        announced.single.actionId,
+      );
+      expect(await refused, isA<UndoRefused>());
+      await run;
+
+      expect((await refused as UndoRefused).reason, kUndoNotApproved);
+      expect(dispatches(), hasLength(1));
+    });
+
+    test('a compensation with nothing to aim at reports the real reason', () async {
+      // The same graph over a dump with no back affordance: the compensating
+      // run plans against the real screen, finds no node it can aim at, and the
+      // executor's own block code is what the user is told.
+      platform.install(<String, Future<Object?> Function(MethodCall call)>{
+        kMethodServiceStatus: (MethodCall call) async =>
+            _connectedStatus(nodeCount: _dump().length),
+        kMethodGetNodes: (MethodCall call) async => <String, dynamic>{
+          'nodes': _dump(),
+          'nodeCount': _dump().length,
+        },
+        kMethodPolicyGate: (MethodCall call) async => <String, dynamic>{
+          'allowed': true,
+          'message': 'ok',
+        },
+        kMethodDispatchGesture: (MethodCall call) async => <String, dynamic>{
+          'executed': true,
+        },
+      });
+      final NoirComposition app = await open(bridge: bridge);
+      addTearDown(app.dispose);
+      final List<ActionCompletedWithUndoWindow> announced = announcements(app);
+
+      final Future<RuntimeResult?> run = await launch(
+        app,
+        const AutomationRequest(action: 'navigate', input: 'Send message'),
+      );
+      while (announced.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final Future<UndoResult> undo = app.undo(announced.single.actionId);
+      (await app.confirmations.first).answer(true);
+
+      final UndoResult refused = await undo;
+      expect((await run)!.blocked, isFalse);
+      expect(refused, isA<UndoRefused>());
+      expect((refused as UndoRefused).reason, kCodeMalformedGestureTarget);
+    });
   });
 
   group('nothing in the new code is a stub', () {

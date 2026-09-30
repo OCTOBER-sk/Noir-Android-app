@@ -15,6 +15,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import '../agent/agent_runtime.dart' show ExecutionReport;
 import '../safety/policy_engine.dart' show GateResult, PolicyEngine;
 import '../safety/risk_classifier.dart' show RiskClassifier, RiskLevel;
 import '../safety/screen_content_sanitizer.dart'
@@ -171,7 +172,12 @@ class NativeGateVerdict {
 /// Result of a `dispatchGesture` request. `executed` is the only field that
 /// may be trusted to mean "a gesture actually reached the accessibility
 /// service".
-class NativeGestureOutcome {
+///
+/// It is an [ExecutionReport] because that is exactly what it is, and the A6
+/// pipeline reads this type to decide whether the action completed enough to
+/// open an undo window for. Nothing else may stand in for it.
+class NativeGestureOutcome implements ExecutionReport {
+  @override
   final bool executed;
   final NativeGateVerdict verdict;
   final String? platformCode;

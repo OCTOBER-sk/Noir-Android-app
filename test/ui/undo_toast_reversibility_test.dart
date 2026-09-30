@@ -40,6 +40,7 @@ void main() {
             'Deleted the note',
             false,
             const Duration(seconds: 5),
+            'undo-1',
           ),
         ),
       );
@@ -61,6 +62,7 @@ void main() {
             'Moved the note to Archive',
             true,
             const Duration(seconds: 5),
+            'undo-1',
           ),
         ),
       );

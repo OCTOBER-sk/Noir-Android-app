@@ -310,9 +310,55 @@ enum UndoOutcome {
 
   /// The caller was not allowed to open a window at all.
   notAllowed,
+
+  /// The action the window would have covered never reached the screen, so
+  /// there is nothing to reverse and nothing to announce. Its own ending, and
+  /// deliberately not [notAllowed]: the caller was allowed, the platform simply
+  /// never confirmed a gesture.
+  notExecuted,
+}
+
+/// The window that is counting down right now, with the action it can still
+/// compensate.
+///
+/// Null from [CountdownUndoWindow.live] means there is no window, which is why
+/// a press is refused rather than answered: the action has either already been
+/// compensated, already elapsed, or never had one.
+class LiveUndoWindow {
+  const LiveUndoWindow({
+    required this.actionId,
+    required this.action,
+    required this.window,
+  });
+
+  /// The handle the announcement carries and a press hands back.
+  final String actionId;
+
+  /// The action that ran, with its plan, its executor and its inverse.
+  final UndoableAction action;
+
+  /// The countdown itself, for a caller that wants the deadline rather than
+  /// the action.
+  final UndoWindow window;
+
+  @override
+  String toString() => 'LiveUndoWindow($actionId, $action)';
 }
 
 /// The A6b undo window: five seconds, cancellable, and reported as an event.
+///
+/// Two properties matter, and both used to be wrong.
+///
+///   * It is announced when it *opens*, not when it ends. Publishing from the
+///     ending meant the toast appeared after the countdown it belonged to was
+///     over, so its control could not be pressed in time — which is the whole
+///     reason the D15 button was drawn disabled and captioned "undo is not wired
+///     to an action executor yet".
+///   * What it announces as `reversible` is whether the action can be
+///     compensated, read off the [UndoableAction] it was handed. It used to be
+///     `outcome == UndoOutcome.cancelled`, which made an action reversible only
+///     after the user had already reversed it and irreversible whenever nobody
+///     pressed anything.
 ///
 /// [AgentRuntimePipeline] takes the result as a bare `UndoState` because that is
 /// the type the pipeline interface declares, so the observable outcome travels
@@ -338,15 +384,35 @@ class CountdownUndoWindow implements UndoWindowOpener {
   /// Ends the window that is counting down right now, if any.
   void Function(UndoOutcome outcome)? _finishCurrent;
 
+  /// The action the live window is offering, while one is open. The composition
+  /// root reads it to answer a press; nothing else may.
+  LiveUndoWindow? _live;
+
   int _sequence = 0;
 
   /// How each window that has been opened ended.
   Stream<UndoOutcome> get outcomes => _outcomes.stream;
 
+  /// The window counting down right now, or null. This is the whole of what an
+  /// undo press is allowed to act on.
+  LiveUndoWindow? get live => _live;
+
   @override
-  Future<UndoState> open(int seconds, {bool allowed = true}) async {
+  Future<UndoState> open(
+    int seconds, {
+    required UndoableAction action,
+    bool allowed = true,
+  }) async {
     if (!allowed) {
       _outcomes.add(UndoOutcome.notAllowed);
+      return UndoState();
+    }
+    if (!action.completed) {
+      // The platform never confirmed a gesture, so there is no completion to
+      // announce and nothing an undo could reverse. Reported as its own ending
+      // rather than swallowed, so a caller watching [outcomes] can tell this
+      // apart from a window nobody was allowed to open.
+      _outcomes.add(UndoOutcome.notExecuted);
       return UndoState();
     }
     _sequence++;
@@ -365,18 +431,28 @@ class CountdownUndoWindow implements UndoWindowOpener {
       if (done.isCompleted) return;
       ticker?.cancel();
       expiry?.cancel();
-      publish?.call(
-        ActionCompletedWithUndoWindow(
-          'action $actionId',
-          outcome == UndoOutcome.cancelled,
-          Duration(seconds: seconds),
-        ),
-      );
       _outcomes.add(outcome);
       done.complete(UndoState());
     }
 
     _finishCurrent = finish;
+    // Published before the first await, so the toast is on screen while the
+    // countdown is still running. The live record is in place before it is
+    // published too, so a press that arrives with the announcement already has
+    // an action to press it on.
+    _live = LiveUndoWindow(
+      actionId: actionId,
+      action: action,
+      window: window,
+    );
+    publish?.call(
+      ActionCompletedWithUndoWindow(
+        action.description,
+        action.isCompensatable,
+        Duration(seconds: seconds),
+        actionId,
+      ),
+    );
     // Two endings, and only two. Cancellation is the user's decision, reported
     // as `cancelled`; running out of time is the clock's, reported as
     // `elapsed`. The ticker watches only for the user's decision, so a window
@@ -396,6 +472,7 @@ class CountdownUndoWindow implements UndoWindowOpener {
       return await done.future;
     } finally {
       _finishCurrent = null;
+      _live = null;
     }
   }
 

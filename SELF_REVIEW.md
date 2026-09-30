@@ -1391,3 +1391,42 @@ unconfirmed-run guard is verified against the executor's own seam with a mocked
 platform channel, and the blocked-reason fix is verified against the real
 composition root, the real gate and a real dispatch. Neither is a person
 watching a job's error field on a phone.
+
+## Heartbeat 2026-09-30 10:54 (re-verification of 5c9e8b3)
+
+The previous heartbeat ended on the code commit `d3175c1` and the docs commit
+`5c9e8b3`. Both gates were read, not assumed:
+
+- **CI run 36684913887** on `d3175c1` — `success`, `Noir CI` (3m22s).
+- **No CI run exists for `5c9e8b3`, and that is expected rather than a gap.**
+  `git show --name-only 5c9e8b3` prints one path, `SELF_REVIEW.md`, and the
+  workflow's `paths-ignore: ['**/*.md']` skips a push only when every changed
+  path matches, so the docs commit is deliberately not gated. The claim here is
+  that the code behind the last green run is unchanged since, not that `5c9e8b3`
+  was verified.
+- **`flutter analyze` locally** — `No issues found!` (1.2s), on `5c9e8b3`.
+- **`flutter test` locally** — exit 0, `🎉 All tests passed!`, final counter
+  **1040 tests**. The count is higher than the 957 recorded for `291fbb3`
+  because the A4 recovery-audit, A12 critic-signal, D15 undo-reason and
+  automation-honesty work landed after it; this run's counter is what was
+  actually observed, not a projection.
+
+**Integration state re-measured.** `git branch --no-merged main` prints nothing,
+so every local branch is already an ancestor of `main`. `git cherry main
+feature/night-automations` also prints nothing: that branch has no unmerged
+commit, and `git diff --shortstat` shows it is 316 insertions / 4816 deletions
+behind `main`, i.e. `main`'s work supersedes it. There is nothing to integrate.
+
+**No workers in flight.** `git worktree list` shows only the main checkout; the
+five `/tmp/noir-wt-*.log` files are stale logs, the newest from 07:07, not
+worktree directories; no `opencode`, `claude`, `codex`, `flutter`, `dart` or
+`gradle` process is running. `main` is clean and level with `origin/main` at
+`5c9e8b3`. This heartbeat integrated nothing and started nothing.
+
+**Model policy.** No coding agent was started this heartbeat, so no model was
+selected and no spend occurred. The standing rule — `opencode/space-bunny-free`
+only, no paid or OpenRouter route — remains in force for the next dispatch.
+
+**Standing gap, unchanged:** no device or emulator run. Java and the Android SDK
+are absent on this host; CI's `assembleDebug` is the only APK evidence, and
+nothing here was observed on hardware.

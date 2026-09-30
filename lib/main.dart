@@ -250,6 +250,11 @@ class _SplashScreenState extends State<SplashScreen> {
           await composition.runAutomation(request);
         },
       ),
+      // The safety log the Safety Center renders. Without it the screen said "No
+      // safety log is connected." while the graph was recording every blocked
+      // gesture, every sanitized dump and every A4 recovery into exactly this
+      // stream — the decisions existed and were unreachable.
+      safetyEvents: composition.safetyEvents(),
       onOpenSettings: _openSettings,
     );
   }

@@ -10,8 +10,12 @@
 //
 // A third section, the safety log, is fed by whatever the app injects: the
 // screen renders the [SafetyEvent]s it is handed and admits when it has none.
-// The policy toggle is drawn inert on purpose — a switch that reads "on" while
-// no policy gate is bound to it would be the most expensive lie in this file.
+// `main.dart` hands it the graph's own `NoirComposition.safetyEvents()`, so the
+// rows are the decisions this process really made — a blocked gesture, a
+// sanitized dump, a confirmation that timed out, a low-confidence reflection
+// routed into A4 recovery. The policy toggle is drawn inert on purpose — a
+// switch that reads "on" while no policy gate is bound to it would be the most
+// expensive lie in this file.
 //
 // Nothing here calls a MethodChannel and nothing here dispatches a gesture:
 // the audit is a read-only consequence of the platform dump.
@@ -27,7 +31,12 @@ import '../safety/screen_content_sanitizer.dart' show SanitizedItem;
 import 'accessibility_status_view.dart';
 
 /// What a safety log entry is about.
-enum SafetyEventKind { policy, sanitization, confirmation, dispatch }
+///
+/// [recovery] is the A4 path: a reflection the critic scored too low to act on.
+/// It is its own kind rather than a `policy` entry because the thing a user needs
+/// to know about it is not that a rule said no — it is which run degraded, how
+/// low its confidence was and which recovery path was chosen.
+enum SafetyEventKind { policy, sanitization, confirmation, dispatch, recovery }
 
 /// What the policy engine decided about it.
 enum SafetyEventOutcome { allowed, blocked, awaitingConfirmation, unknown }

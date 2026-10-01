@@ -2261,3 +2261,22 @@ recovery engine's `RECOVERY_NEEDS_REVIEW` instead of the executor's narrower
 **Device evidence: unchanged.** Java and the Android SDK are still absent on this host. No APK was built here and the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate in `ddf8b3a` asserts the manifest declaration, not runtime behaviour.
 
 **Next action:** nothing until new work is dispatched. The carried-forward design questions remain open by choice: gate refusals never reaching recovery; the `GateResult` shape (`d25263f`’s own worker recorded that `SanitizingRecoveryEngine` does not carry the outcome out, so undo reports the recovery engine’s `RECOVERY_NEEDS_REVIEW` instead of the executor’s narrower `MALFORMED_GESTURE_TARGET`); and the overlapping audit row in `composition_root_test.dart`.
+
+---
+
+## Heartbeat 2026-10-02 00:20 UTC
+
+**State.** `main` at `cfd1c69`, level with `origin/main` (`git rev-list --left-right --count origin/main...HEAD` = `0 0`), working tree clean (0 porcelain lines), no stashes. The only commit since the 21:57 heartbeat is that heartbeat's own `SELF_REVIEW.md` record — no code changed. `git branch --no-merged origin/main` is **empty**: all 28 non-main local branches are ancestors of `main`; nothing to integrate. `git worktree list` shows only the main checkout, confirming the pre-run script's "worktree missing" for provider/mcp/data/product/ui/android. `ps` matched no `opencode`, `claude`, `dart`, `flutter` or `gradle` process. No worker in flight. No open PRs.
+
+**Re-verified on `main` at `cfd1c69`**, run by the supervisor in the main checkout:
+
+- `flutter analyze` — `No issues found!` (0.8s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1056**.
+
+**CI.** Latest run **36905111160** on `9f5dd30` is `success` (14m59s). No run exists for `cfd1c69` because it touched only `SELF_REVIEW.md`.
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost incurred. This heartbeat ran only `git`, `ps`, `flutter analyze`, `flutter test` and `gh run list` — all local and free. `opencode/space-bunny-free` remains the only permitted route.
+
+**Device evidence: unchanged.** Java and the Android SDK are still absent on this host. No APK was built here and the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate in `ddf8b3a` asserts the manifest declaration, not runtime behaviour.
+
+**Next action:** nothing until new work is dispatched. Carried-forward design questions remain open by choice: gate refusals never reaching recovery; the `GateResult` shape (`d25263f`'s worker recorded that `SanitizingRecoveryEngine` does not carry the outcome out, so undo reports the recovery engine's `RECOVERY_NEEDS_REVIEW` instead of the executor's narrower `MALFORMED_GESTURE_TARGET`); and the overlapping audit row in `composition_root_test.dart`.

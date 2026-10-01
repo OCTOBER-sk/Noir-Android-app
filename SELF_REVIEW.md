@@ -1988,4 +1988,73 @@ remain open by choice.
 **On this file's own suggestion:** the observation from the 14:5x entry stands
 and is worth keeping — gate these entries on a dirty tree, a new CI run, or a
 non-zero diff from the last recorded SHA. That rule is why this entry exists and
-why the four before it were shaped as they were.
+and why the four before it were shaped as they were.
+
+## Heartbeat 2026-10-01 07:2x
+
+This run has one non-idle finding, and it is a contradiction inside this file's
+own record rather than new implementation work.
+
+**Verified state at `67f06e2`, in the main checkout:**
+
+- `git status --porcelain` — empty. `HEAD` == `origin/main` == `67f06e2`.
+- `git branch --no-merged main` — empty. No unintegrated commit on any branch.
+- No `opencode`, `claude`, `flutter`, or `dart` process running.
+- `git worktree list` — the main checkout only. The six `/tmp/noir-wt-*` files
+  are stale logs, not worktrees; no worker was in flight when this ran.
+- `flutter analyze` — `No issues found!` (0.8s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m28s).
+  Independently reproduced here, not read off the previous entry.
+
+So the code state is exactly what the 02:5x entry described, and that entry's
+verification of the `canPerformGestures` mutation check was sound. Nothing about
+the accessibility gate changed.
+
+**The finding: the spend record is wrong.**
+
+The 02:5x entry asserts, in this file, that spend was zero and that
+`opencode/space-bunny-free` "remains the only permitted route; no paid model and
+no OpenRouter fallback." `opencode.json` does pin `model`/`small_model` to
+`opencode/space-bunny-free`, so the *config* matches that claim.
+
+But the two commits that entry depends on carry a different model in their
+trailers:
+
+    ddf8b3a  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+    67f06e2  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+`ddf8b3a` is the commit that added `test/accessibility_declaration_test.dart` —
+the 15 tests the 02:5x entry credits to its own verification — and `67f06e2` is
+the entry itself. The five entries before them carry no trailer at all.
+
+A `Co-Authored-By` trailer naming a paid Anthropic model is direct evidence in
+the repository that work was produced by something other than the free Zen route.
+The entry's spend paragraph and the trailers cannot both be true. The trailer is
+the stronger evidence, since it was written into the repo by the tooling that
+did the work rather than asserted afterwards in prose.
+
+I cannot resolve *which* is wrong from here: it may be that the agent ran on Opus
+and the spend paragraph is the error, or that the trailer is a stale default and
+the spend paragraph is right. What is certain is that the file currently claims
+a clean spend record on the strength of a line the repository itself
+contradicts.
+
+**Why this is recorded rather than fixed.** Rewriting the earlier entries to match
+a conclusion I cannot verify would be the failure mode this file exists to
+prevent. The contradiction is left standing and named.
+
+**Practical note.** Nothing in the repo pins the model for Claude Code the way
+`opencode.json` pins it for OpenCode — `.claude/settings.local.json` is the only
+other agent config present. If the intended policy is "free route only, on every
+agent," the gap is that the policy is expressed in a config one tool reads and
+assumed for the other. An explicit `ANTHROPIC_MODEL` pin or equivalent guard
+would close it, but that changes the policy surface and is left for a deliberate
+decision rather than made silently inside a heartbeat.
+
+**Device evidence:** unchanged. Java and the Android SDK are still absent on this
+host; no APK built here; the bridge has never been observed on hardware.
+
+**Next action:** resolve the trailer/spend contradiction before new work is
+dispatched, since a wrong spend record makes every later entry's "no cost
+incurred" line untrustworthy. No agent dispatched by this run; no model selected;
+no cost incurred by this heartbeat.

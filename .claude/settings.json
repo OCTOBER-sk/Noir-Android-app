@@ -1,0 +1,16 @@
+{
+  "model": {
+    "provider": "openrouter",
+    "model": "poolside/laguna-s-2.1:free",
+    "fallback_model": "cohere/north-mini-code:free",
+    "thinking_fallback": "thinkingmachines/inkling:free",
+    "permission_mode": "acceptEdits"
+  },
+  "permissions": {
+    "allow": ["Read", "Edit", "Bash", "Write"],
+    "ask": [],
+    "deny": []
+  },
+  "max_turns": 10,
+  "allowed_tools": ["Read", "Edit", "Bash", "Write", "WebSearch", "WebFetch"]
+}

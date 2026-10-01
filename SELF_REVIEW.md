@@ -1938,3 +1938,54 @@ entries are byte-for-byte the same shape (idle main, 1041 tests, same CI run,
 same standing gap). Recording another one adds noise rather than signal. Consider
 gating these entries on actual change — a dirty tree, a new CI run, or a
 non-zero diff from the last recorded SHA — and staying silent otherwise.
+
+## Heartbeat 2026-10-01 02:5x
+
+Not an idle entry: `ddf8b3a` landed the accessibility-declaration gate since the
+last recorded heartbeat, and this run is the first to verify it.
+
+**Tree.** `main` clean at `ddf8b3a`, in sync with `origin/main`. No worker
+processes running; every `/tmp/noir-wt-*` worktree from the provider/mcp/data/
+product/ui/android round is gone, and `git branch --no-merged main` is empty, so
+no unintegrated commit is sitting on a local branch.
+
+**Verified in the main checkout, not read off the commit message:**
+
+- `flutter analyze` — `No issues found!` (7.3s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m27s). This
+  supersedes the 1041 the last four entries carried; the delta is the 15 new
+  tests in `test/accessibility_declaration_test.dart`.
+- `test/accessibility_declaration_test.dart` alone — 15/15 pass.
+
+**The gate has teeth, checked by mutation.** I flipped
+`android:canPerformGestures` to `"false"` in
+`res/xml/accessibility_service_config.xml` and re-ran: the suite went to
+`+14 -1` with `canPerformGestures is true` failing. Restored via
+`git checkout --`; `git status --porcelain` is empty and the file passes again.
+So the claim that the test fails closed on the exact regression it names is
+confirmed independently, not taken on trust.
+
+**CI.** Run **36826707546** on `ddf8b3a` — `success`. That is the first CI run
+covering the new test, and it agrees with the local count.
+
+**Scope of the gate, restated because it is easy to overread.** It asserts the
+*declaration* — that the service is declared, system-bound, capability-flagged,
+and that its `@xml`/`@string` references resolve. It observes nothing at
+runtime. The device story is unchanged and still unproven: Java and the Android
+SDK are absent on this host, so no APK has been built here and the
+Dart/Kotlin `PlatformException` correspondence remains asserted from source.
+Nothing in this repo has ever run the bridge on hardware.
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost
+incurred. `opencode/space-bunny-free` remains the only permitted route; no paid
+model and no OpenRouter fallback.
+
+**Next action:** nothing until new work is dispatched. The carried-forward
+design questions (gate refusals never reaching recovery; the 0.20 rung
+unit-covered only; the overlapping audit row in `composition_root_test.dart`)
+remain open by choice.
+
+**On this file's own suggestion:** the observation from the 14:5x entry stands
+and is worth keeping — gate these entries on a dirty tree, a new CI run, or a
+non-zero diff from the last recorded SHA. That rule is why this entry exists and
+why the four before it were shaped as they were.

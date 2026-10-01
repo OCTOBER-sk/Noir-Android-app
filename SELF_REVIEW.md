@@ -2156,3 +2156,48 @@ manifest, not runtime behaviour.
 raised is cleared, with the audit file as the evidence. This run dispatched no
 agent, selected no model, and ran no paid route; `flutter analyze` and
 `flutter test` are local and free.
+
+---
+
+## Heartbeat 2026-10-01 19:15 UTC
+
+**State.** `main` at `9f5dd30`, level with `origin/main` after `git fetch`
+(both `9f5dd302f982e15e120f81f36d7a2fab4da4e292`), working tree clean, no
+stashes. `git branch --no-merged main` is **empty** — all 29 local branches,
+including the four September worker branches (`feat/critic-signal` `50767f2`,
+`feat/undo-recovery-reason` `d25263f`, `feat/undo-executor` `ecb07d5`,
+`feature/recovery-audit-surface` `73ac4e3`), verified as ancestors of `main`
+with `git merge-base --is-ancestor`. `git worktree list` shows only the main
+checkout; the `/tmp/noir-wt-*` paths do not exist. `ps` matched no `opencode`,
+`claude`, `dart`, `flutter` or `gradle` process. No worker in flight, nothing
+to integrate.
+
+**Re-verified on `main` at `9f5dd30`**, run by the supervisor in the main
+checkout, tree clean before and after:
+
+- `flutter analyze` — `No issues found!` (0.8s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1056**.
+
+**CI.** Run **36905111160** on `9f5dd30` is `success` (14m59s) — the first CI
+run covering the in-repo Claude Code model pin from `9f5dd30`. This closes the
+config-level gap the 07:2x entry named: nothing in the repo pinned a model for
+Claude Code, so a future agent reaching for Opus would have left no trace. The
+pin now exists in `.claude/settings.json` at the tip of `main`.
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost
+incurred. This heartbeat ran only `git`, `ps`, `find`, `flutter analyze`,
+`flutter test` and `gh run list` — all local, and `flutter test` is local too.
+`opencode/space-bunny-free` remains the only permitted route.
+
+**Device evidence: unchanged.** Java and the Android SDK are still absent on
+this host. No APK was built here and the accessibility bridge has never been
+observed on hardware. The `canPerformGestures` gate in `ddf8b3a` asserts the
+manifest declaration, not runtime behaviour.
+
+**Next action:** nothing until new work is dispatched. The carried-forward
+design questions remain open by choice: gate refusals never reaching recovery;
+the `GateResult` shape (`d25263f`'s own worker recorded that
+`SanitizingRecoveryEngine` does not carry the outcome out, so undo reports the
+recovery engine's `RECOVERY_NEEDS_REVIEW` instead of the executor's narrower
+`MALFORMED_GESTURE_TARGET`); and the overlapping audit row in
+`composition_root_test.dart`.

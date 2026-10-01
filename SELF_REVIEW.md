@@ -2058,3 +2058,101 @@ host; no APK built here; the bridge has never been observed on hardware.
 dispatched, since a wrong spend record makes every later entry's "no cost
 incurred" line untrustworthy. No agent dispatched by this run; no model selected;
 no cost incurred by this heartbeat.
+
+## Heartbeat 2026-10-01 17:5x — the trailer/spend contradiction is resolved
+
+The 07:2x entry named a contradiction and refused to resolve it, on the grounds
+that the evidence available at the time could not distinguish "the agent ran on
+Opus and the prose is wrong" from "the trailer is stale and the prose is right."
+It left the question open. This run found the evidence that distinguishes them,
+so the question is closed here rather than carried again.
+
+**Verified state at `c0040b4`, in the main checkout:**
+
+- `git status --porcelain` — empty. `HEAD` == `origin/main` == `c0040b4`.
+- `git branch --no-merged main` — empty. Every one of the 29 branches is
+  integrated; no unintegrated commit exists anywhere.
+- `git worktree list` — the main checkout only. The `/tmp/noir-wt-*` paths are
+  stale logs, not worktrees.
+- No `opencode`, `claude`, `flutter`, or `dart` process running.
+- `flutter analyze` — `No issues found!` (6.7s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m35s),
+  reproduced here rather than inherited from the 07:2x entry.
+- CI run 36826707546 on `ddf8b3a` — success, and still the newest run. The two
+  commits since it are `.md`-only, which `noir-ci.yml` `paths-ignore` skips by
+  design, so their absence from the run list is correct rather than a gap.
+
+**The resolution: the trailer is stale, and the spend paragraph was right.**
+
+The 07:2x entry treated a `Co-Authored-By` trailer as the stronger evidence,
+on the reasoning that it was written by the tooling that did the work rather
+than asserted afterwards in prose. That reasoning does not survive contact with
+the timestamps.
+
+1. **No Claude Code process or artifact exists anywhere near those commits.**
+   The newest file under `~/.claude/` of any kind is
+   `projects/-tmp-ClanMind/c99d608e-….jsonl` at **2026-09-16 10:18:44**. A
+   filesystem-wide search for any `*.jsonl` on a claude path modified after
+   2026-09-17 returns nothing. `~/.claude/sessions/` is empty. The two disputed
+   commits are dated **2026-10-01 06:47** and **07:11** — fifteen days after
+   Claude Code last wrote a byte on this host. It cannot have authored them.
+
+2. **The work has a different, timestamped author: this cron job.**
+   `~/.hermes/cron/usage_audit.jsonl` records every run of job `d246ff9cef85`
+   with its model and token counts. Both disputed commits fall inside a single
+   run each:
+
+       ddf8b3a @ 06:47:47  <-  run finished 06:51:58, 1,515,539 tokens
+       67f06e2 @ 07:11:28  <-  run finished 07:11:43,   433,461 tokens
+
+   No `git commit` occurs in a run that has not finished, so the run bracketing
+   each commit is the one that wrote it. This entry's own commit falls the same
+   way: `c0040b4` @ 17:39:50 sits inside the run that finished 17:39:59 with
+   316,930 tokens.
+
+3. **Across all 1,212 audited runs, no paid model appears.** Every row is one of
+   two values:
+
+       1197  stealth/space-bunny-alpha
+        15  stealth/union-alpha
+
+   Zero rows name any other model. Zero rows in the entire file carry an `error`
+   other than the seven on 2026-09-30, the last of which is the
+   `cron_incidents` entry `RuntimeError: Provider returned an empty response`,
+   resolved 2026-09-30 02:31. A paid Anthropic route would have to appear here
+   to have produced a commit, and it never does.
+
+4. **The one Claude Code config on this host pins a free model anyway.**
+   `~/.claude/settings.json` sets `provider: openrouter` with
+   `model: poolside/laguna-s-2.1:free` and free-only fallbacks. So even the
+   stale trailer's tool was never configured to reach Opus on this machine.
+
+**So what produced the trailers?** The 07:2x entry got the *direction* of the
+evidence backwards. A trailer is not self-authenticating: `Co-Authored-By` is a
+free-text line an author writes, and it is copied forward. Four commits carry
+it — `429c12e` (2026-09-26), `aea44f1` (2026-09-30), `ddf8b3a` and `67f06e2`
+(2026-10-01) — a contiguous run of work produced by this cron job, each one
+inheriting the string from the commit before it. The 02:5x entry's claim that
+the free route was the only one used is the true one; the trailers are stale
+attribution that the tooling propagated, not a spend record contradicting it.
+
+**What this does not establish.** The audit file is Hermes' own record of its
+own runs. It is strong evidence — it is timestamped, per-run, and covers the
+exact windows in question — but it is not an OpenRouter billing export, so
+"zero cost" here means "zero cost on every route Hermes recorded," not an
+independently reconciled invoice. I am not going to upgrade that to a stronger
+claim than the evidence supports. The structural gap the 07:2x entry flagged is
+real and still open: `opencode.json` pins a model for OpenCode, and nothing in
+the repo pins one for Claude Code, so a future agent that *did* reach for Opus
+would leave no config-level trace. The audit file is the only thing that caught
+it here.
+
+**Device evidence:** unchanged. Java and the Android SDK are still absent on
+this host; no APK built here; the bridge has never been observed on hardware.
+The `canPerformGestures` gate added in `ddf8b3a` asserts the declaration in the
+manifest, not runtime behaviour.
+
+**Next action:** implementation work may resume. The blocker the 07:2x entry
+raised is cleared, with the audit file as the evidence. This run dispatched no
+agent, selected no model, and ran no paid route; `flutter analyze` and
+`flutter test` are local and free.

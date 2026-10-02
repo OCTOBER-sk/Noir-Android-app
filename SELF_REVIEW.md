@@ -2575,3 +2575,22 @@ This heartbeat changes no code, so the verified test state carries over unchange
 **Device evidence: unchanged.** No JVM and no Android SDK on this host; only the Flutter SDK at `/tmp/opencode/flutter`. No APK built here; the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate asserts the manifest declaration, not runtime behaviour.
 
 **Next action:** push the docs-only backlog to clear the ahead-count, then idle until new work is dispatched. Carried-forward design questions remain open by choice: gate refusals never reaching recovery; the `GateResult` shape; the overlapping audit row in `composition_root_test.dart`; and the `AgentRuntimePipeline` recovery route being unreachable with the shipped `ReflectionCritic`.
+
+---
+
+## Heartbeat 2026-10-02 02:52 UTC
+
+**State.** `main` at `898b25a`, **in sync with `origin/main`** — `git log --oneline origin/main..main` is now **empty**, so the four-commit docs backlog carried by the 02:32/02:44 heartbeats has been pushed and the ahead-count is back to 0. `git diff --stat origin/main..HEAD` is **empty** (nothing unpushed at all). Working tree clean (0 porcelain lines). `git branch --no-merged main` is **empty** — every feature/fix/integration branch remains merged; nothing to integrate. `git worktree list` shows only the main checkout, so the pre-run script's "worktree missing" for provider/mcp/data/product/ui/android is expected: `/tmp/noir-wt-*` holds stale analyze/agent logs only (newest `noir-wt-recovery-e2e.log`, 2026-09-30 12:12), no live worktree directories. `ps` matched **no** `opencode`, `claude`, `codex`, `flutter`, `dart` or gradle process — no worker in flight, nothing to supervise.
+
+**Re-verified on `main` at `898b25a`** in the main checkout:
+
+- `flutter analyze` — `No issues found!` (0.8s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m32s), same counter as the 02:44 run; no drift.
+
+**CI.** Latest run **36905111160** on `9f5dd30` is `success` (14m59s); prior `36826707546` also `success`. The newly pushed docs-only commits did not trigger a run — the workflow skips docs-only pushes by design (`de8838f`), which is the expected outcome, not a gap.
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost incurred. This heartbeat ran only `git`, `ps`, `ls`, `gh run list` and `flutter analyze`/`flutter test` — all local and free. `opencode/space-bunny-free` remains the only permitted route; no paid or OpenRouter route used.
+
+**Device evidence: unchanged.** No JVM and no Android SDK on this host; only the Flutter SDK at `/tmp/opencode/flutter`. No APK built here; the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate in `ddf8b3a` asserts the manifest declaration, not runtime behaviour.
+
+**Next action:** idle — nothing to integrate and no worker to supervise until new work is dispatched. The repo is now clean against `origin/main`, so no push is pending. Carried-forward design questions remain open by choice: gate refusals never reaching recovery; the `GateResult` shape; the overlapping audit row in `composition_root_test.dart`; and the `AgentRuntimePipeline` recovery route being unreachable with the shipped `ReflectionCritic`.

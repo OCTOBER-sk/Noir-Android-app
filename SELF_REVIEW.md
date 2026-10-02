@@ -2655,3 +2655,21 @@ This heartbeat changes no code, so the verified test state carries over unchange
 **Device evidence: unchanged.** No JVM and no Android SDK on this host; only the Flutter SDK at `/tmp/opencode/flutter`. No APK built here; the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate in `ddf8b3a` asserts the manifest declaration, not runtime behaviour.
 
 **Next action:** idle — nothing to integrate, no push pending, no worker to supervise until new work is dispatched. Carried-forward design questions remain open by choice: gate refusals never reaching recovery; the `GateResult` shape; the overlapping audit row in `composition_root_test.dart`; and the `AgentRuntimePipeline` recovery route being unreachable with the shipped `ReflectionCritic`.
+
+---
+
+## Heartbeat 2026-10-02 04:55 UTC
+
+**State.** `main` at `cec9fbf`, in sync with `origin/main` (`0  0`), working tree clean, `git branch --no-merged main` empty (all 28 branches merged). `git worktree list` shows only the main checkout; `/tmp/noir-wt-*` holds stale analyze logs only. `ps` matched no `opencode`/`claude`/`codex`/`flutter`/`gradle` process — no worker in flight.
+
+**Re-verified on `main`.** `flutter analyze` — `No issues found!` (0.8s). `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m28s). Sixth consecutive run at 1056.
+
+**Delta.** `cec9fbf` is docs-only (`SELF_REVIEW.md`), so the flat counter is expected.
+
+**CI.** Latest run **36905111160** on `9f5dd30` `success`; `36826707546`, `36713571920` also `success`. Docs-only pushes skip CI by design.
+
+**Spend.** No agent dispatched, no model selected, no cost. Local `git`/`ps`/`gh`/flutter only; `opencode/space-bunny-free` remains the only route.
+
+**Device evidence: unchanged.** No JVM, no Android SDK on this host; no APK built; accessibility bridge never observed on hardware.
+
+**Next action:** idle — nothing to integrate, no push pending. Open design questions carried forward unchanged.

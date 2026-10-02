@@ -2558,3 +2558,20 @@ This heartbeat changes no code, so the verified test state carries over unchange
 **Device evidence: unchanged.** No JVM and no Android SDK on this host; only the Flutter SDK at `/tmp/opencode/flutter`. No APK built here; the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate in `ddf8b3a` asserts the manifest declaration, not runtime behaviour.
 
 **Next action:** nothing until new work is dispatched. `main` carries three unpushed docs commits — pushing them would clear the ahead-count without changing the verified test state, but no push was attempted this heartbeat. Carried-forward design questions remain open by choice: gate refusals never reaching recovery; the `GateResult` shape; the overlapping audit row in `composition_root_test.dart`; and the `AgentRuntimePipeline` recovery route being unreachable with the shipped `ReflectionCritic` (recorded as an honest limit by the recovery-audit worker).
+
+---
+
+## Heartbeat 2026-10-02 02:44 UTC
+
+**State.** `main` at `b106eda`, **ahead of `origin/main` by 4** (`c8b6209`, `782d53b`, `b71a756`, `b106eda` — all `SELF_REVIEW.md`-only). `git diff --stat origin/main..HEAD -- lib test android pubspec.yaml analysis_options.yaml` is **empty**: no unpushed production, test or build change. Working tree clean. `git branch --no-merged main` is **empty** — all feature/fix branches merged, nothing to integrate. `git worktree list` shows only the main checkout; `/tmp/noir-wt-*` contains stale analyze/agent logs only, so the pre-run script's "worktree missing" for provider/mcp/data/product/ui/android is expected, not a failure. `ps` matched **no** `opencode`, `claude`, `codex`, `flutter`, `dart` or gradle process — no worker in flight.
+
+**Re-verified on `main` at `b106eda`** in the main checkout:
+
+- `flutter analyze` — `No issues found!` (0.8s).
+- `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m27s).
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost. `opencode/space-bunny-free` remains the only permitted route.
+
+**Device evidence: unchanged.** No JVM and no Android SDK on this host; only the Flutter SDK at `/tmp/opencode/flutter`. No APK built here; the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate asserts the manifest declaration, not runtime behaviour.
+
+**Next action:** push the docs-only backlog to clear the ahead-count, then idle until new work is dispatched. Carried-forward design questions remain open by choice: gate refusals never reaching recovery; the `GateResult` shape; the overlapping audit row in `composition_root_test.dart`; and the `AgentRuntimePipeline` recovery route being unreachable with the shipped `ReflectionCritic`.

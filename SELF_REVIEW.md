@@ -2691,3 +2691,21 @@ This heartbeat changes no code, so the verified test state carries over unchange
 **Device evidence: unchanged.** No JVM, no Android SDK on this host; no APK built; accessibility bridge never observed on hardware.
 
 **Next action:** idle — nothing to integrate, no push pending, no worker to supervise until new work is dispatched. Open design questions carried forward unchanged.
+
+---
+
+## Heartbeat 2026-10-02 05:50 UTC
+
+**State.** `main` at `d310ec1`, in sync with `origin/main` (`git rev-list --left-right --count origin/main...main` → `0  0`), working tree clean before this entry. `git branch --no-merged main` empty — all 29 non-main branches merged, nothing to integrate. `git worktree list` shows only the main checkout, so the pre-run script's "worktree missing" for provider/mcp/data/product/ui/android is expected, not a failure; `/tmp/noir-wt-*` contains stale analyze logs only (newest `noir-wt-recovery-e2e.log`, 2026-09-30 12:12). `ps` matched no `opencode`/`claude`/`codex`/`flutter`/`dart`/gradle process — no worker in flight.
+
+**Re-verified on `main` at `d310ec1`.** `flutter analyze` — `No issues found!` (1.2s). `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m46s). Eighth consecutive run at 1056.
+
+**Delta since 05:09.** Only the `05:09` docs commit (`6d2cd17`..`d310ec1`, `SELF_REVIEW.md | 18 +++`). No code change, so the flat counter is expected. Last non-docs commit on `main` is still `9f5dd30` (2026-10-01 18:12, free-model policy pin).
+
+**CI.** `36905111160` (14m59s), `36826707546`, `36713571920`, `36684913887`, `36682433380` all `success`. Docs-only pushes skip CI by design.
+
+**Spend.** No agent dispatched, no worker started, no model selected, no cost incurred. Local `git`/`ps`/`gh`/flutter only. `opencode/space-bunny-free` remains the only permitted route; no paid or OpenRouter route used.
+
+**Device evidence: unchanged.** No JVM and no Android SDK on this host; only the Flutter SDK at `/tmp/opencode/flutter`. No APK built here; the accessibility bridge has never been observed on hardware. The `canPerformGestures` gate in `ddf8b3a` asserts the manifest declaration, not runtime behaviour.
+
+**Next action:** idle — nothing to integrate, no push pending, no worker to supervise until new work is dispatched. Open design questions carried forward unchanged: gate refusals never reaching recovery; the `GateResult` shape; the overlapping audit row in `composition_root_test.dart`; and the `AgentRuntimePipeline` recovery route being unreachable with the shipped `ReflectionCritic`.

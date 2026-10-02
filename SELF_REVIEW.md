@@ -2673,3 +2673,21 @@ This heartbeat changes no code, so the verified test state carries over unchange
 **Device evidence: unchanged.** No JVM, no Android SDK on this host; no APK built; accessibility bridge never observed on hardware.
 
 **Next action:** idle — nothing to integrate, no push pending. Open design questions carried forward unchanged.
+
+---
+
+## Heartbeat 2026-10-02 05:09 UTC
+
+**State.** `main` at `6d2cd17`, in sync with `origin/main` (`0  0`), working tree clean (0 porcelain lines), `git branch --no-merged main` empty (29 branches total, all merged). `git worktree list` shows only the main checkout, so the pre-run script's "worktree missing" for provider/mcp/data/product/ui/android is expected, not a failure — `/tmp/noir-wt-*` holds stale analyze logs only (newest `noir-wt-recovery-e2e.log`, 2026-09-30 12:12). `ps` matched no `opencode`/`claude`/`codex`/`flutter`/`dart`/gradle process — no worker in flight.
+
+**Re-verified on `main` at `6d2cd17`.** `flutter analyze` — `No issues found!` (0.9s). `flutter test` — exit 0, `All tests passed!`, counter **1056** (1m33s). Seventh consecutive run at 1056.
+
+**Delta.** `6d2cd17` is docs-only (`SELF_REVIEW.md`), so the flat counter is expected.
+
+**CI.** `36905111160` (15m0s), `36826707546`, `36713571920`, `36684913887`, `36682433380` all `success`. Docs-only pushes skip CI by design.
+
+**Spend.** No agent dispatched, no model selected, no cost. Local `git`/`ps`/`gh`/flutter only; `opencode/space-bunny-free` remains the only permitted route.
+
+**Device evidence: unchanged.** No JVM, no Android SDK on this host; no APK built; accessibility bridge never observed on hardware.
+
+**Next action:** idle — nothing to integrate, no push pending, no worker to supervise until new work is dispatched. Open design questions carried forward unchanged.
